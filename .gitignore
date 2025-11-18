@@ -1,0 +1,59 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Dependency directories
+node_modules/
+bower_components/
+
+# Testing & coverage
+coverage/
+.nyc_output/
+coverage-final.json
+
+# Build artifacts & temp files
+dist/
+build/
+.cache/
+tmp/
+temp/
+
+# Environment files
+.env
+.env.*
+*.env
+!.env.example
+
+# Database / dumps
+*.sqlite
+*.db
+*.sql
+*.dump
+
+# Tooling caches
+.eslintcache
+.stylelintcache
+.node_repl_history
+
+# Editors & workspace
+.vscode/
+.idea/
+*.iml
+
+# OS-specific
+.DS_Store
+Thumbs.db
+
+# Redis snapshots
+dump.rdb
