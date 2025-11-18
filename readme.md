@@ -1,6 +1,6 @@
 # payeazie
 
-Node.js/Fastify payments microservice focused on idempotent payment intent creation, payment orchestration, gateway interaction, webhook processing, and reconciliation backed by PostgreSQL and Redis/BullMQ.
+Node.js/Fastify payments system focused on idempotent payment intent creation, payment orchestration, gateway interaction, webhook processing, and reconciliation backed by PostgreSQL and Redis/BullMQ.
 
 ## Highlights
 - Idempotent payment intents enforced by Postgres unique constraints and the `idempotency.service` resolver.
