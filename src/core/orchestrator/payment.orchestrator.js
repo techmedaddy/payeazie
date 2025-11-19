@@ -1,90 +1,180 @@
 const db = require('../../db');
 const gatewayClient = require('../../utils/gateway-client');
-const PaymentModel = require('../../db/models/payment.model');
+const queue = require('../../utils/queue');
 
 const ALLOWED_TRANSITIONS = {
-    'processing': ['authorized', 'failed'],
-    'authorized': ['captured'],
-    'captured': ['succeeded'],
-    'succeeded': ['refunded'],
-    'failed': [],
-    'refunded': []
+    processing: new Set(['authorized', 'failed']),
+    authorized: new Set(['captured', 'failed']),
+    captured: new Set(['succeeded', 'failed']),
+    succeeded: new Set(['refunded']),
+    failed: new Set(['refunded']),
+    refunded: new Set()
 };
 
-const validateTransition = (currentStatus, newStatus) => {
-    const allowed = ALLOWED_TRANSITIONS[currentStatus] || [];
-    if (!allowed.includes(newStatus)) {
-        throw new Error(`Illegal state transition: ${currentStatus} -> ${newStatus}`);
+class InvalidTransitionError extends Error {
+    constructor(message) {
+        super(message);
+        this.name = 'InvalidTransitionError';
     }
+}
+
+class NotFoundError extends Error {
+    constructor(message) {
+        super(message);
+        this.name = 'NotFoundError';
+    }
+}
+
+const chargeGateway = typeof gatewayClient.charge === 'function'
+    ? gatewayClient.charge.bind(gatewayClient)
+    : gatewayClient.createCharge.bind(gatewayClient);
+
+const enqueueOutboxEvent = async (payload) => {
+    if (queue && typeof queue.enqueue === 'function') {
+        await queue.enqueue('outbox', payload);
+        return;
+    }
+    // TODO: enqueue payload into outbox once queue.enqueue helper exists.
 };
 
-const createProcessingRecord = async (paymentId) => {
-    return db.one(PaymentModel.selectById, [paymentId]);
+const canTransition = (current, next) => {
+    if (next === 'refunded') {
+        return current !== 'refunded';
+    }
+    const allowed = ALLOWED_TRANSITIONS[current] || new Set();
+    return allowed.has(next);
 };
 
-const executeCharge = async (payment) => {
-    if (payment.gateway_charge_id) {
-        return payment;
+const initiateCharge = async (payment) => {
+    if (!payment || !payment.id || !payment.idempotency_key) {
+        throw new Error('payment.id and payment.idempotency_key are required');
     }
 
-    const gatewayResult = await gatewayClient.charge(payment);
-    
-    // Determine status based on gateway success
-    const newStatus = gatewayResult.success ? 'authorized' : 'failed';
+    const updated = await db.tx(async t => {
+        const locked = await t.oneOrNone(
+            'SELECT * FROM payments WHERE id = $1 FOR UPDATE SKIP LOCKED',
+            [payment.id]
+        );
 
-    return applyGatewayResult(payment.id, {
-        id: gatewayResult.id,
-        status: newStatus
+        if (!locked) {
+            throw new NotFoundError(`Payment ${payment.id} not found`);
+        }
+
+        if (locked.gateway_charge_id) {
+            return locked;
+        }
+
+        const gatewayResult = await chargeGateway({
+            amount: locked.amount,
+            currency: locked.currency,
+            idempotencyKey: locked.idempotency_key
+        });
+
+        if (!gatewayResult || !gatewayResult.status) {
+            throw new Error('Gateway result missing status');
+        }
+
+        if (!canTransition(locked.status, gatewayResult.status)) {
+            throw new InvalidTransitionError(`${locked.status} -> ${gatewayResult.status}`);
+        }
+
+        return t.one(
+            `UPDATE payments
+             SET gateway_charge_id = $2,
+                 status = $3,
+                 updated_at = NOW()
+             WHERE id = $1
+             RETURNING *`,
+            [locked.id, gatewayResult.id || locked.gateway_charge_id, gatewayResult.status]
+        );
     });
+
+    await enqueueOutboxEvent({
+        type: 'payment.status.changed',
+        paymentId: updated.id,
+        status: updated.status,
+        gatewayChargeId: updated.gateway_charge_id
+    });
+
+    return updated;
 };
 
 const applyGatewayResult = async (paymentId, gatewayResult) => {
-    return db.tx(async t => {
-        const payment = await t.one(PaymentModel.selectById, [paymentId]);
-        
-        validateTransition(payment.status, gatewayResult.status);
+    if (!paymentId || !gatewayResult || !gatewayResult.status) {
+        throw new Error('paymentId and gatewayResult.status are required');
+    }
 
-        return t.one(PaymentModel.updateGatewayFields, {
-            id: paymentId,
-            gateway_charge_id: gatewayResult.id,
-            status: gatewayResult.status
+    return db.tx(async t => {
+        const current = await t.oneOrNone('SELECT * FROM payments WHERE id = $1 FOR UPDATE', [paymentId]);
+
+        if (!current) {
+            throw new NotFoundError(`Payment ${paymentId} not found`);
+        }
+
+        if (
+            current.status === gatewayResult.status &&
+            (!gatewayResult.id || current.gateway_charge_id === gatewayResult.id)
+        ) {
+            return current;
+        }
+
+        const transitioned = await transitionStatus(paymentId, gatewayResult.status, {
+            transaction: t,
+            currentRow: current
         });
+
+        return t.one(
+            `UPDATE payments
+             SET gateway_charge_id = COALESCE($2, gateway_charge_id),
+                 updated_at = NOW()
+             WHERE id = $1
+             RETURNING *`,
+            [paymentId, gatewayResult.id || transitioned.gateway_charge_id]
+        );
     });
 };
 
-const applyWebhookUpdate = async (gatewayChargeId, newStatus) => {
-    return db.tx(async t => {
-        const payment = await t.oneOrNone('SELECT * FROM payments WHERE gateway_charge_id = $1', [gatewayChargeId]);
-        
-        if (!payment) {
-            return null; // Ignore if not found
+const transitionStatus = async (paymentId, newStatus, opts = {}) => {
+    if (!paymentId || !newStatus) {
+        throw new Error('paymentId and newStatus are required');
+    }
+
+    const run = async (t) => {
+        const current = opts.currentRow || await t.oneOrNone('SELECT * FROM payments WHERE id = $1 FOR UPDATE', [paymentId]);
+
+        if (!current) {
+            throw new NotFoundError(`Payment ${paymentId} not found`);
         }
 
-        // Idempotency check for webhooks: ignore if same status
-        if (payment.status === newStatus) {
-            return payment;
+        if (current.status === newStatus) {
+            return current;
         }
 
-        // Ignore if status is "older" (simplistic check via transition validity)
-        // If the transition is not allowed, we assume it's an out-of-order or redundant event
-        try {
-            validateTransition(payment.status, newStatus);
-        } catch (e) {
-            // If transition is illegal, we ignore the webhook update rather than throwing
-            // to prevent webhook retry loops for stale events
-            return payment;
+        if (!canTransition(current.status, newStatus)) {
+            throw new InvalidTransitionError(`${current.status} -> ${newStatus}`);
         }
 
-        return t.one(PaymentModel.updateStatus, {
-            id: payment.id,
-            status: newStatus
-        });
-    });
+        return t.one(
+            `UPDATE payments
+             SET status = $2,
+                 updated_at = NOW()
+             WHERE id = $1
+             RETURNING *`,
+            [paymentId, newStatus]
+        );
+    };
+
+    if (opts.transaction) {
+        return run(opts.transaction);
+    }
+
+    return db.tx(run);
 };
 
 module.exports = {
-    createProcessingRecord,
-    executeCharge,
+    initiateCharge,
     applyGatewayResult,
-    applyWebhookUpdate
+    transitionStatus,
+    InvalidTransitionError,
+    NotFoundError
 };
