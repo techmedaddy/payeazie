@@ -1,3 +1,5 @@
+require('dotenv').config({ path: './.env' });
+
 const server = require('fastify')({ logger: true });
 
 // Initialize DB (side-effect)
@@ -14,7 +16,7 @@ server.register(require('./src/api/routes/payment.routes'), { prefix: '/payments
 
 // Start Server
 const start = () => {
-    const port = process.env.PORT || 3000;
+    const port = process.env.PORT || 3467;
     server.listen({ port, host: '0.0.0.0' })
         .catch(err => {
             server.log.error(err);
