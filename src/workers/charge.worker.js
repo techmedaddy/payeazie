@@ -1,49 +1,67 @@
+require('dotenv').config();
+
 const { createWorker } = require('../utils/queue');
 const db = require('../db');
 const logger = require('../utils/logger');
 const gatewayClient = require('../utils/gateway-client');
 
-const worker = createWorker('payment-charge', async (job) => {
-    const { paymentId } = job.data;
+if (!process.env.REDIS_URL) {
+    logger.error('charge.worker missing REDIS_URL');
+    process.exit(1);
+}
+
+const worker = createWorker('payment_charge', async (job) => {
+    const { paymentId } = job.data || {};
+
+    if (!paymentId) {
+        logger.error({ jobId: job.id }, 'charge.worker missing paymentId');
+        return;
+    }
+
+    logger.info({ jobId: job.id, paymentId }, 'charge.worker job started');
 
     try {
-        await db.tx(async t => {
+        await db.tx(async (t) => {
             const payment = await t.oneOrNone(
                 'SELECT * FROM payments WHERE id = $1 FOR UPDATE SKIP LOCKED',
                 [paymentId]
             );
 
             if (!payment) {
-                logger.error({ paymentId }, 'Payment record not found');
+                logger.warn({ paymentId }, 'charge.worker payment not found');
                 return;
             }
 
             if (payment.gateway_charge_id) {
-                logger.info({ paymentId }, 'Payment already charged, skipping');
+                logger.info({ paymentId }, 'charge.worker already processed');
                 return;
             }
 
-            const result = await gatewayClient.createCharge({
+            const chargeResult = await gatewayClient.charge({
                 amount: payment.amount,
                 currency: payment.currency,
                 idempotencyKey: payment.idempotency_key
             });
 
             await t.none(
-                'UPDATE payments SET gateway_charge_id = $1, status = $2, updated_at = NOW() WHERE id = $3',
-                [result.id, result.status, paymentId]
+                `UPDATE payments
+                 SET gateway_charge_id = $2,
+                     status = $3,
+                     updated_at = NOW()
+                 WHERE id = $1`,
+                [payment.id, chargeResult.id, chargeResult.status]
             );
 
-            logger.info({ 
-                paymentId, 
-                gatewayChargeId: result.id, 
-                status: result.status 
-            }, 'Charge executed successfully');
+            logger.info({ paymentId, gatewayChargeId: chargeResult.id, status: chargeResult.status }, 'charge.worker job succeeded');
         });
     } catch (err) {
-        logger.error({ err, paymentId }, 'Charge execution failed');
+        logger.error({ paymentId, err }, 'charge.worker job failed');
         throw err;
     }
+});
+
+worker.on('error', (err) => {
+    logger.error({ err }, 'charge.worker Redis error');
 });
 
 module.exports = worker;

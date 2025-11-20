@@ -1,47 +1,77 @@
+require('dotenv').config();
+
+const { createWorker } = require('../utils/queue');
 const db = require('../db');
 const logger = require('../utils/logger');
 const gatewayClient = require('../utils/gateway-client');
 
-const runReconciliation = async () => {
-    logger.info('Starting reconciliation run');
+const DEFAULT_WINDOW_MINUTES = 30;
+const FINAL_STATUSES = new Set(['succeeded', 'failed', 'refunded']);
 
-    try {
-        const payments = await db.any(
-            "SELECT * FROM payments WHERE created_at > NOW() - INTERVAL '24 hours' AND status != 'succeeded' AND gateway_charge_id IS NOT NULL"
-        );
-
-        for (const payment of payments) {
-            try {
-                const gatewayData = await gatewayClient.fetchCharge(payment.gateway_charge_id);
-
-                if (gatewayData.status === 'succeeded' && payment.status !== 'succeeded') {
-                    await db.none(
-                        "UPDATE payments SET status = 'succeeded', updated_at = NOW() WHERE id = $1",
-                        [payment.id]
-                    );
-                    logger.info({ paymentId: payment.id }, 'Reconciled: Payment updated to succeeded');
-                } else if (gatewayData.status === 'failed' && payment.status === 'processing') {
-                    await db.none(
-                        "UPDATE payments SET status = 'failed', updated_at = NOW() WHERE id = $1",
-                        [payment.id]
-                    );
-                    logger.info({ paymentId: payment.id }, 'Reconciled: Payment updated to failed');
-                } else if (gatewayData.status !== payment.status) {
-                    logger.warn({ 
-                        paymentId: payment.id, 
-                        dbStatus: payment.status, 
-                        gatewayStatus: gatewayData.status 
-                    }, 'Status mismatch detected');
-                }
-            } catch (err) {
-                logger.error({ err, paymentId: payment.id }, 'Failed to reconcile individual payment');
-            }
-        }
-    } catch (err) {
-        logger.error({ err }, 'Reconciliation run failed');
-    }
-
-    logger.info('Reconciliation run complete');
+const fetchNonFinalPayments = () => {
+    return db.any(
+        `SELECT id, status, gateway_charge_id
+         FROM payments
+         WHERE status NOT IN ('succeeded', 'failed', 'refunded')
+           AND gateway_charge_id IS NOT NULL
+           AND updated_at >= NOW() - ($1 || ' minutes')::interval`,
+        [DEFAULT_WINDOW_MINUTES]
+    );
 };
 
-module.exports = { runReconciliation };
+const reconcilePayment = async (payment) => {
+    try {
+        const remote = await gatewayClient.lookup(payment.gateway_charge_id);
+
+        if (!remote) {
+            logger.warn({ paymentId: payment.id }, 'reconcile.worker.missingGatewayRecord');
+            return;
+        }
+
+        if (remote.status === payment.status || FINAL_STATUSES.has(payment.status) && FINAL_STATUSES.has(remote.status)) {
+            return;
+        }
+
+        await db.tx(async t => {
+            await t.none(
+                `UPDATE payments
+                 SET status = $2,
+                     updated_at = NOW()
+                 WHERE id = $1`,
+                [payment.id, remote.status]
+            );
+        });
+
+        logger.info({ paymentId: payment.id, status: remote.status }, 'reconcile.worker.updatedStatus');
+    } catch (err) {
+        logger.error({ paymentId: payment.id, err }, 'reconcile.worker.paymentFailed');
+    }
+};
+
+const worker = createWorker('payment_reconcile', async (job) => {
+    logger.info({ jobId: job?.id }, 'reconcile.worker.jobStart');
+
+    try {
+        const candidates = await fetchNonFinalPayments();
+
+        if (!candidates.length) {
+            logger.info('reconcile.worker.noCandidates');
+            return;
+        }
+
+        for (const payment of candidates) {
+            await reconcilePayment(payment);
+        }
+
+        logger.info({ processed: candidates.length }, 'reconcile.worker.jobComplete');
+    } catch (err) {
+        logger.error({ err, jobId: job?.id }, 'reconcile.worker.jobFailed');
+        throw err;
+    }
+});
+
+worker.on('error', (err) => {
+    logger.error({ err }, 'reconcile.worker.redisError');
+});
+
+module.exports = worker;
