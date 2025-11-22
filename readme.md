@@ -220,3 +220,5 @@ sequenceDiagram
 - Health check lives at `/health` for probes.
 - Use `LOG_LEVEL=debug` during integration to capture SQL + worker chatter; switch to `info` in production.
 - The included gateway client is deterministic; replace `src/utils/gateway-client.js` with a real provider while preserving the same method signatures.
+
+Read about idempotency- https://medium.com/@techmedaddy/idempotency-a-deep-dive-triggered-by-a-real-world-double-charge-failure-7cf1b5c4356f
