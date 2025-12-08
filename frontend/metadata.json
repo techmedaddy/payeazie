@@ -1,0 +1,5 @@
+{
+  "name": "Payeazie",
+  "description": "Enterprise-grade payment processing frontend with idempotency guarantees and real-time status tracking.",
+  "requestFramePermissions": []
+}
