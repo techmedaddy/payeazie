@@ -1,5 +1,6 @@
 const paymentController = require('../controllers/payment.controller');
 const webhookController = require('../controllers/webhook.controller');
+const sseController = require('../controllers/sse.controller');
 
 /**
  * Backward compatibility for legacy controller method names
@@ -93,6 +94,18 @@ module.exports = async function paymentRoutes(fastify) {
     '/payments/:paymentId',
     { schema: getPaymentSchema },
     paymentController.getPaymentStatus
+  );
+
+  // Get payment audit log
+  fastify.get(
+    '/payments/:paymentId/audit',
+    paymentController.getPaymentAuditLog
+  );
+
+  // SSE endpoint for real-time payment status updates
+  fastify.get(
+    '/payments/:paymentId/stream',
+    sseController.streamPaymentStatus
   );
 
   // Manual reconciliation trigger endpoint (useful for testing/debugging)

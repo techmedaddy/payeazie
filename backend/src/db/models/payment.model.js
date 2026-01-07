@@ -6,7 +6,7 @@ module.exports = {
             idempotency_key UUID NOT NULL,
             amount BIGINT NOT NULL,
             currency VARCHAR(3) NOT NULL,
-            status VARCHAR(20) NOT NULL DEFAULT 'processing',
+            status VARCHAR(20) NOT NULL DEFAULT 'pending',
             gateway_charge_id TEXT UNIQUE,
             created_at TIMESTAMPTZ DEFAULT NOW(),
             updated_at TIMESTAMPTZ DEFAULT NOW()

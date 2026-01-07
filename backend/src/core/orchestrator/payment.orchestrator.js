@@ -1,13 +1,12 @@
 const db = require('../../db');
 const logger = require('../../utils/logger');
+const statusTransitionService = require('../status-transition/status-transition.service');
 
 const ALLOWED_TRANSITIONS = {
-    processing: new Set(['authorized', 'failed']),
-    authorized: new Set(['captured', 'failed']),
-    captured: new Set(['succeeded', 'failed']),
-    succeeded: new Set(['refunded']),
-    failed: new Set(['refunded']),
-    refunded: new Set()
+    pending: new Set(['processing', 'failed']),
+    processing: new Set(['succeeded', 'failed']),
+    succeeded: new Set([]),
+    failed: new Set([])
 };
 
 class InvalidTransitionError extends Error {
@@ -25,14 +24,11 @@ class NotFoundError extends Error {
 }
 
 const canTransition = (current, next) => {
-    if (!current) {
+    if (!current || !next) {
         return false;
     }
     if (current === next) {
         return true;
-    }
-    if (next === 'refunded') {
-        return current !== 'refunded';
     }
     const allowed = ALLOWED_TRANSITIONS[current];
     return allowed ? allowed.has(next) : false;
@@ -41,7 +37,7 @@ const canTransition = (current, next) => {
 const fetchPaymentForUpdate = (t, paymentId) =>
     t.oneOrNone('SELECT * FROM payments WHERE id = $1 FOR UPDATE', [paymentId]);
 
-const applyStatus = async (paymentId, status) => {
+const applyStatus = async (paymentId, status, metadata = {}) => {
     if (!paymentId) {
         throw new Error('paymentId is required');
     }
@@ -49,30 +45,8 @@ const applyStatus = async (paymentId, status) => {
         throw new Error('status is required');
     }
 
-    return db.tx(async (t) => {
-        const current = await fetchPaymentForUpdate(t, paymentId);
-
-        if (!current) {
-            throw new NotFoundError(`Payment ${paymentId} not found`);
-        }
-
-        if (!canTransition(current.status, status)) {
-            throw new InvalidTransitionError(`${current.status} -> ${status}`);
-        }
-
-        if (current.status === status) {
-            return current;
-        }
-
-        return t.one(
-            `UPDATE payments
-             SET status = $2,
-                 updated_at = NOW()
-             WHERE id = $1
-             RETURNING *`,
-            [paymentId, status]
-        );
-    });
+    // Delegate to status transition service which handles audit logs and events
+    return statusTransitionService.transitionStatus(paymentId, status, metadata);
 };
 
 const attachGatewayCharge = async (paymentId, chargeId, status) => {

@@ -123,7 +123,34 @@ const getPaymentStatus = async (req, reply) => {
     }
 };
 
+const getPaymentAuditLog = async (req, reply) => {
+    const logger = require('../../utils/logger');
+    const statusTransition = require('../../core/status-transition/status-transition.service');
+    const { paymentId } = req.params || {};
+
+    logger.info({ paymentId }, 'getPaymentAuditLog: incoming request');
+
+    if (!paymentId) {
+        logger.warn('getPaymentAuditLog: missing paymentId');
+        return sendResponse(reply, 400, { error: 'paymentId is required' });
+    }
+
+    try {
+        const auditLog = await statusTransition.getAuditLog(paymentId);
+        logger.info({ paymentId, count: auditLog.length }, 'getPaymentAuditLog: success');
+        return sendResponse(reply, 200, { paymentId, auditLog });
+    } catch (err) {
+        logger.error({
+            error: err.message,
+            stack: err.stack,
+            paymentId
+        }, 'getPaymentAuditLog: error caught');
+        return sendResponse(reply, 500, { error: 'Unable to fetch audit log' });
+    }
+};
+
 module.exports = {
     createPaymentIntent,
-    getPaymentStatus
+    getPaymentStatus,
+    getPaymentAuditLog
 };

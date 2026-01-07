@@ -5,6 +5,7 @@ const db = require('../db');
 const logger = require('../utils/logger');
 const gatewayClient = require('../utils/gateway-client');
 const metrics = require('../utils/metrics');
+const statusTransition = require('../core/status-transition/status-transition.service');
 
 if (!process.env.REDIS_URL) {
     logger.error('charge.worker missing REDIS_URL');
@@ -24,6 +25,14 @@ const worker = createWorker('payment_charge', async (job) => {
     logger.info({ jobId: job.id, paymentId }, 'charge.worker job started');
 
     try {
+        // Step 1: Transition from 'pending' to 'processing' when worker starts
+        await statusTransition.transitionStatus(paymentId, 'processing', {
+            worker: 'charge.worker',
+            jobId: job.id,
+            reason: 'Worker acquired job lock'
+        });
+        logger.info({ paymentId }, 'charge.worker: transitioned to processing');
+
         await db.tx(async (t) => {
             const payment = await t.oneOrNone(
                 'SELECT * FROM payments WHERE id = $1 FOR UPDATE SKIP LOCKED',
@@ -52,42 +61,71 @@ const worker = createWorker('payment_charge', async (job) => {
                 logger.info({ paymentId, chargeId: chargeResult.id, status: chargeResult.status }, 'charge.worker gateway responded');
             } catch (gatewayErr) {
                 logger.error({ paymentId, error: gatewayErr.message }, 'charge.worker gateway failed');
-                // Mark payment as failed
-                await t.none(
-                    `UPDATE payments
-                     SET status = 'failed',
-                         updated_at = NOW()
-                     WHERE id = $1`,
-                    [payment.id]
-                );
+                
+                // Update gateway_charge_id if available, but status will be updated via statusTransition below
+                if (gatewayErr.chargeId) {
+                    await t.none(
+                        `UPDATE payments
+                         SET gateway_charge_id = $2,
+                             updated_at = NOW()
+                         WHERE id = $1`,
+                        [payment.id, gatewayErr.chargeId]
+                    );
+                }
+                
                 throw gatewayErr;
             }
 
-            // Update payment with gateway charge ID and status
+            // Update payment with gateway charge ID (status will be updated via statusTransition)
             await t.none(
                 `UPDATE payments
                  SET gateway_charge_id = $2,
-                     status = $3,
                      updated_at = NOW()
                  WHERE id = $1`,
-                [payment.id, chargeResult.id, chargeResult.status]
+                [payment.id, chargeResult.id]
             );
 
             logger.info({
                 paymentId,
                 gatewayChargeId: chargeResult.id,
-                status: chargeResult.status
+                gatewayStatus: chargeResult.status
             }, 'charge.worker job succeeded');
-            
-            // Record successful processing
-            metrics.recordPaymentStatus(chargeResult.status);
         });
+
+        // Step 2: After successful gateway charge, transition to final status
+        // This happens outside the db transaction to ensure the gateway_charge_id is committed
+        await statusTransition.transitionStatus(paymentId, 'succeeded', {
+            worker: 'charge.worker',
+            jobId: job.id,
+            reason: 'Gateway charge completed successfully'
+        });
+        
+        logger.info({ paymentId }, 'charge.worker: transitioned to succeeded');
+        metrics.recordPaymentStatus('succeeded');
         
         // Record successful job completion with processing time
         const processingTime = Date.now() - startTime;
         metrics.recordWorkerJob('charge', true, processingTime);
     } catch (err) {
         logger.error({ paymentId, error: err.message, stack: err.stack }, 'charge.worker job failed');
+        
+        // Step 3: On error, transition to 'failed' status
+        try {
+            await statusTransition.transitionStatus(paymentId, 'failed', {
+                worker: 'charge.worker',
+                jobId: job.id,
+                reason: 'Gateway charge failed',
+                error: err.message
+            });
+            logger.info({ paymentId }, 'charge.worker: transitioned to failed');
+            metrics.recordPaymentStatus('failed');
+        } catch (transitionErr) {
+            logger.error({ 
+                paymentId, 
+                error: transitionErr.message 
+            }, 'charge.worker: failed to transition to failed status');
+        }
+        
         metrics.recordWorkerJob('charge', false, Date.now() - startTime);
         throw err;
     }
