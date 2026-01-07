@@ -4,7 +4,7 @@ import { Activity, DollarSign, AlertCircle, CheckCircle } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { PaymentService } from '../services/payments';
 import { PaymentResponse, PaymentStatus } from '../types';
-import Badge from '../components/ui/Badge';
+import StatusBadge from '../components/ui/StatusBadge';
 
 // Mock data for analytics (since backend specific endpoint for aggregate stats wasn't specified)
 const ANALYTICS_DATA = [
@@ -147,7 +147,7 @@ const Dashboard: React.FC = () => {
                     <div>
                       <div className="flex items-center gap-2">
                          <span className="font-mono text-xs text-slate-500">#{payment.orderId}</span>
-                         <Badge status={payment.status} className="scale-75 origin-left" />
+                         <StatusBadge status={payment.status} size="sm" showIcon={true} />
                       </div>
                       <div className="text-sm font-semibold text-slate-900 mt-1">
                         {payment.amount} <span className="text-xs text-slate-500">{payment.currency}</span>

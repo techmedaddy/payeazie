@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { PaymentService } from '../services/payments';
 import { PaymentResponse, PaymentStatus } from '../types';
-import Badge from '../components/ui/Badge';
+import StatusBadge from '../components/ui/StatusBadge';
 import { Loader2, ArrowLeft, RefreshCw, CreditCard, Calendar, Hash, Server } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import { cn } from '../utils/cn';
@@ -93,7 +93,7 @@ const PaymentDetails: React.FC = () => {
           <div>
              <div className="flex items-center gap-3 mb-2">
                <h1 className="text-2xl font-bold text-slate-900">Payment Details</h1>
-               <Badge status={payment.status} className="text-sm px-3 py-1" />
+               <StatusBadge status={payment.status} size="md" showIcon={true} />
              </div>
              <p className="text-slate-500 flex items-center gap-2">
                ID: <span className="font-mono text-slate-700 select-all">{payment.id}</span>
