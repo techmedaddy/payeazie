@@ -10,6 +10,7 @@ require('dotenv').config();
 const db = require('../src/db');
 const paymentModel = require('../src/db/models/payment.model');
 const eventModel = require('../src/db/models/event.model');
+const paymentAuditModel = require('../src/db/models/payment_audit.model');
 
 async function initDatabase() {
   try {
@@ -41,6 +42,20 @@ async function initDatabase() {
         await db.none(indexSql);
       }
       console.log('✓ Events indexes ready');
+    }
+
+    // Create payment_audit_log table
+    console.log('\nCreating payment audit log table...');
+    await db.none(paymentAuditModel.createTable);
+    console.log('✓ Payment audit log table ready');
+
+    // Create indexes for payment_audit_log
+    if (paymentAuditModel.indexes && paymentAuditModel.indexes.length > 0) {
+      console.log('Creating payment audit log indexes...');
+      for (const indexSql of paymentAuditModel.indexes) {
+        await db.none(indexSql);
+      }
+      console.log('✓ Payment audit log indexes ready');
     }
 
     console.log('\n✓ Database initialization completed successfully');

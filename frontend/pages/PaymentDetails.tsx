@@ -3,9 +3,10 @@ import { useParams, Link } from 'react-router-dom';
 import { PaymentService } from '../services/payments';
 import { PaymentResponse, PaymentStatus } from '../types';
 import StatusBadge from '../components/ui/StatusBadge';
-import { Loader2, ArrowLeft, RefreshCw, CreditCard, Calendar, Hash, Server } from 'lucide-react';
+import { Loader2, ArrowLeft, RefreshCw, CreditCard, Calendar, Hash, Server, Wifi, WifiOff } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import { cn } from '../utils/cn';
+import { usePaymentStream } from '../hooks/usePaymentStream';
 
 const PaymentDetails: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -14,42 +15,44 @@ const PaymentDetails: React.FC = () => {
   const [error, setError] = useState(false);
   const { showToast } = useToast();
   
-  // Use a ref to control polling interval
-  const pollIntervalRef = useRef<number | null>(null);
+  // Use SSE for real-time status updates instead of polling
+  const { isConnected, latestStatus } = usePaymentStream(id || null, {
+    onStatusChange: (event) => {
+      console.log('Status changed:', event);
+      // Refetch payment details when status changes
+      if (id) {
+        fetchPayment(true);
+      }
+    },
+    onError: (err) => {
+      console.error('SSE error:', err);
+      // Fall back to manual refresh on error
+    },
+    onConnect: () => {
+      console.log('SSE connected for payment:', id);
+    },
+    onDisconnect: () => {
+      console.log('SSE disconnected for payment:', id);
+    },
+  });
 
-  const fetchPayment = async (isPolling = false) => {
+  const fetchPayment = async (silent = false) => {
     if (!id) return;
+    if (!silent) setLoading(true);
     try {
       const data = await PaymentService.getPaymentById(id);
       setPayment(data);
-      
-      // Stop polling if final state reached
-      if (data.status === PaymentStatus.SUCCEEDED || data.status === PaymentStatus.FAILED) {
-        if (pollIntervalRef.current) {
-          window.clearInterval(pollIntervalRef.current);
-          pollIntervalRef.current = null;
-        }
-      }
       setError(false);
     } catch (err) {
       console.error(err);
-      if (!isPolling) setError(true);
+      setError(true);
     } finally {
-      if (!isPolling) setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
   useEffect(() => {
     fetchPayment();
-
-    // Start polling
-    pollIntervalRef.current = window.setInterval(() => {
-      fetchPayment(true);
-    }, 3000);
-
-    return () => {
-      if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
-    };
   }, [id]);
 
   if (loading) {
@@ -94,6 +97,18 @@ const PaymentDetails: React.FC = () => {
              <div className="flex items-center gap-3 mb-2">
                <h1 className="text-2xl font-bold text-slate-900">Payment Details</h1>
                <StatusBadge status={payment.status} size="md" showIcon={true} />
+               {/* Real-time connection indicator */}
+               {isConnected ? (
+                 <div className="flex items-center gap-1 text-xs text-emerald-600 bg-emerald-50 px-2 py-1 rounded-full">
+                   <Wifi className="w-3 h-3" />
+                   <span>Live</span>
+                 </div>
+               ) : (
+                 <div className="flex items-center gap-1 text-xs text-slate-400 bg-slate-100 px-2 py-1 rounded-full">
+                   <WifiOff className="w-3 h-3" />
+                   <span>Offline</span>
+                 </div>
+               )}
              </div>
              <p className="text-slate-500 flex items-center gap-2">
                ID: <span className="font-mono text-slate-700 select-all">{payment.id}</span>
