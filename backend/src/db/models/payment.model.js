@@ -2,7 +2,7 @@ module.exports = {
     createTable: `
         CREATE TABLE IF NOT EXISTS payments (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            order_id UUID NOT NULL,
+            order_id TEXT NOT NULL,
             idempotency_key UUID NOT NULL,
             amount BIGINT NOT NULL,
             currency VARCHAR(3) NOT NULL,

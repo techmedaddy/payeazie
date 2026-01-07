@@ -1,4 +1,5 @@
 const db = require('../../db');
+const logger = require('../../utils/logger');
 
 const ALLOWED_TRANSITIONS = {
     processing: new Set(['authorized', 'failed']),
@@ -107,11 +108,14 @@ const attachGatewayCharge = async (paymentId, chargeId, status) => {
     });
 };
 
-const fetchStatus = (paymentId) => {
+const fetchStatus = async (paymentId) => {
     if (!paymentId) {
         throw new Error('paymentId is required');
     }
-    return db.oneOrNone('SELECT * FROM payments WHERE id = $1', [paymentId]);
+    logger.debug({ paymentId }, 'orchestrator.fetchStatus: querying database');
+    const payment = await db.oneOrNone('SELECT * FROM payments WHERE id = $1', [paymentId]);
+    logger.debug({ paymentId, found: !!payment }, 'orchestrator.fetchStatus: result');
+    return payment;
 };
 
 const transitionStatus = (paymentId, newStatus) => applyStatus(paymentId, newStatus);

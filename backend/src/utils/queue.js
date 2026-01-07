@@ -2,6 +2,7 @@ require('dotenv').config();
 
 const { Queue, Worker } = require('bullmq');
 const logger = require('./logger');
+const metrics = require('./metrics');
 
 const redisUrl = process.env.REDIS_URL;
 
@@ -33,8 +34,14 @@ const createWorker = (name, processor) => {
         concurrency: 5
     });
 
+    worker.on('completed', (job) => {
+        logger.info({ queue: name, jobId: job.id }, 'BullMQ worker completed job');
+        metrics.recordQueueJob('completed');
+    });
+
     worker.on('failed', (job, err) => {
         logger.error({ queue: name, jobId: job?.id, err }, 'BullMQ worker failed job');
+        metrics.recordQueueJob('failed');
     });
 
     worker.on('error', (err) => {
@@ -44,13 +51,25 @@ const createWorker = (name, processor) => {
     return worker;
 };
 
-const queueClient = {
+// Initialize queues once
+const queues = {
     payment_charge: createQueue('payment_charge'),
-    payment_reconcile: createQueue('payment_reconcile'),
-    add: async (queueName, jobName, payload, opts) => {
+    payment_reconcile: createQueue('payment_reconcile')
+};
+
+const queueClient = {
+    ...queues,
+    add: async (queueName, jobName, payload, opts = {}) => {
         assertQueueName(queueName);
-        const queue = queueClient[queueName] || createQueue(queueName);
-        return queue.add(jobName, payload, opts);
+        const queue = queues[queueName];
+        metrics.recordQueueJob('enqueued');
+        return queue.add(jobName, payload, {
+            attempts: 3,          // retry up to 3 times
+            backoff: { type: 'exponential', delay: 2000 },
+            removeOnComplete: true,
+            removeOnFail: false,
+            ...opts
+        });
     }
 };
 
