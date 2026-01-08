@@ -19,21 +19,31 @@ module.exports = {
 
             const chargeId = "ch_" + idempotencyKey.replace(/-/g, "");
 
-            // Simulate realistic outcomes: 80% succeeded, 15% processing, 5% failed
+            // Simulate realistic outcomes: 90% succeeded, 10% failed
+            // Note: Removed 'processing' status - gateway should return terminal status
+            // If a real gateway returns 'processing', handle via reconciliation worker
             const rand = Math.random();
-            const status = rand < 0.80 ? "succeeded" : rand < 0.95 ? "processing" : "failed";
+            const status = rand < 0.90 ? "succeeded" : "failed";
 
             logger.info({ chargeId, amount, currency, status }, 'gatewayClient.charge simulated');
 
             const responseTime = Date.now() - startTime;
             metrics.recordGatewayCall(true, responseTime);
 
-            return {
+            const response = {
                 id: chargeId,
                 amount,
                 currency,
                 status
             };
+            
+            // Validate response structure
+            if (!response.id || !response.status) {
+                logger.error({ response }, 'gatewayClient.charge: invalid response structure');
+                throw new Error('Invalid gateway response: missing id or status');
+            }
+            
+            return response;
         } catch (err) {
             metrics.recordGatewayCall(false, Date.now() - startTime);
             throw err;

@@ -33,7 +33,8 @@ const worker = createWorker('payment_charge', async (job) => {
         });
         logger.info({ paymentId }, 'charge.worker: transitioned to processing');
 
-        let chargeResult;
+        // Declare chargeResult outside transaction so it's accessible later
+        let chargeResult = null;
 
         await db.tx(async (t) => {
             const payment = await t.oneOrNone(
@@ -59,7 +60,12 @@ const worker = createWorker('payment_charge', async (job) => {
                     currency: payment.currency,
                     idempotencyKey: payment.idempotency_key
                 });
-                logger.info({ paymentId, chargeId: chargeResult.id, status: chargeResult.status }, 'charge.worker gateway responded');
+                logger.info({ 
+                    paymentId, 
+                    chargeId: chargeResult?.id, 
+                    gatewayStatus: chargeResult?.status,
+                    fullResponse: chargeResult 
+                }, 'charge.worker gateway responded');
             } catch (gatewayErr) {
                 logger.error({ paymentId, error: gatewayErr.message }, 'charge.worker gateway failed');
 
@@ -87,16 +93,37 @@ const worker = createWorker('payment_charge', async (job) => {
         });
 
         // Step 2: Transition to the actual gateway status
+        // Ensure we have a valid chargeResult
+        if (!chargeResult) {
+            logger.warn({ paymentId }, 'charge.worker: chargeResult is null/undefined, defaulting to failed');
+        }
+        
         const finalStatus = chargeResult?.status || 'failed';
+        logger.info({ 
+            paymentId, 
+            chargeResultExists: !!chargeResult, 
+            gatewayStatus: chargeResult?.status,
+            finalStatus 
+        }, 'charge.worker: determining final status');
 
-        await statusTransition.transitionStatus(paymentId, finalStatus, {
-            worker: 'charge.worker',
-            jobId: job.id,
-            reason: `Gateway charge completed with status: ${finalStatus}`
-        });
-
-        logger.info({ paymentId, finalStatus }, `charge.worker: transitioned to ${finalStatus}`);
-        metrics.recordPaymentStatus(finalStatus);
+        try {
+            await statusTransition.transitionStatus(paymentId, finalStatus, {
+                worker: 'charge.worker',
+                jobId: job.id,
+                chargeId: chargeResult?.id,
+                reason: `Gateway charge completed with status: ${finalStatus}`
+            });
+            logger.info({ paymentId, finalStatus }, `charge.worker: transitioned to ${finalStatus}`);
+            metrics.recordPaymentStatus(finalStatus);
+        } catch (transitionErr) {
+            logger.error({ 
+                paymentId, 
+                finalStatus, 
+                error: transitionErr.message, 
+                stack: transitionErr.stack 
+            }, 'charge.worker: CRITICAL - failed to transition to final status');
+            throw transitionErr;
+        }
 
         const processingTime = Date.now() - startTime;
         metrics.recordWorkerJob('charge', true, processingTime);
