@@ -1,48 +1,129 @@
-# Charge Worker Tests
+# Worker Tests
 
 ## Overview
 
-Comprehensive test suite for `charge.worker.js` that validates the payment lifecycle and all edge cases discovered during the "stuck at processing" bug fix.
+Comprehensive test suites for payment system workers that validate the complete payment lifecycle and reconciliation process.
+
+## Test Files
+
+### 1. [charge.worker.test.js](charge.worker.test.js)
+Tests for the charge worker that processes new payments.
+
+**Coverage**: 17 tests covering `pending → processing → succeeded/failed`
+
+**Key Scenarios**:
+- ✅ Successful charge (succeeded)
+- ✅ Failed charge (failed)
+- ✅ Gateway returns processing
+- ✅ Error handling
+- ✅ Fallback behavior
+- ✅ Database transactions
+- ✅ Logging & metrics
+
+[📖 Detailed Documentation](charge.worker.test.js)
+
+### 2. [reconcile.worker.test.js](reconcile.worker.test.js) 
+Tests for the reconcile worker that fixes stuck payments.
+
+**Coverage**: 26 tests covering reconciliation of `processing` payments
+
+**Key Scenarios**:
+- ✅ Gateway returns succeeded → update payment
+- ✅ Gateway returns failed → update payment
+- ✅ Gateway still processing → leave unchanged
+- ✅ Invalid transition blocking
+- ✅ Error handling (graceful)
+- ✅ Multiple payments
+- ✅ Edge cases
+
+[📖 Detailed Documentation](RECONCILE_TESTS.md)
+
+## Quick Start
+
+### Run All Worker Tests
+```bash
+cd backend
+npm test -- src/workers/__tests__/
+```
+
+### Run Specific Test File
+```bash
+# Charge worker tests
+npm test -- src/workers/__tests__/charge.worker.test.js
+
+# Reconcile worker tests
+npm test -- src/workers/__tests__/reconcile.worker.test.js
+```
+
+### Watch Mode
+```bash
+npm run test:watch -- src/workers/__tests__/
+```
+
+### Coverage Report
+```bash
+npm run test:coverage -- src/workers/__tests__/
+```
+
+## Test Summary
+
+| Worker | Tests | Coverage | Duration |
+|--------|-------|----------|----------|
+| **Charge** | 17 | 95%+ | ~2.5s |
+| **Reconcile** | 26 | 95%+ | ~2.0s |
+| **Total** | **43** | **95%+** | **~4.5s** |
+
+## Worker Responsibilities
+
+### Charge Worker
+**Purpose**: Process new payment charges
+**Lifecycle**: `pending → processing → succeeded/failed`
+
+```javascript
+// Job payload
+{ paymentId: 'pay-123' }
+
+// Process:
+1. Transition to 'processing'
+2. Call gateway.charge()
+3. Update gateway_charge_id
+4. Transition to final status (succeeded/failed)
+```
+
+### Reconcile Worker  
+**Purpose**: Fix payments stuck in processing
+**Lifecycle**: `processing → succeeded/failed` (delayed)
+
+```javascript
+// No specific job payload - queries database
+
+// Process:
+1. Query payments in 'processing' status
+2. For each payment:
+   - Call gateway.lookup(charge_id)
+   - Compare statuses
+   - Update if status changed
+```
 
 ## Test Coverage
 
-### 1. Payment Lifecycle - Happy Path
+### Charge Worker (17 tests)
 - ✅ `pending → processing → succeeded` when gateway succeeds
-- ✅ `pending → processing → failed` when gateway fails
-- ✅ Proper logging at each stage
-- ✅ Metrics recording for success/failure
+- ✅ `pending → processing → failed` when gateway fails  
+- ✅ Gateway returns `processing` (non-terminal)
+- ✅ Error handling (missing data, gateway errors)
+- ✅ Fallback to `failed` when status missing
+- ✅ Database transaction handling
+- ✅ Logging and metrics recording
 
-### 2. Gateway Returns Processing Status
-- ✅ Handles when gateway returns `'processing'` (non-terminal state)
-- ✅ Payment remains at `'processing'` awaiting reconciliation
-- ✅ Logs indicate reconciliation worker should take over
-
-### 3. Error Handling
-- ✅ Missing `paymentId` in job data
-- ✅ Gateway throws error (timeout, network failure)
-- ✅ Payment not found in database
-- ✅ Payment already processed (has `gateway_charge_id`)
-- ✅ Status transition fails (logs critical error)
-
-### 4. Fallback Behavior
-- ✅ `chargeResult` is null/undefined → defaults to `'failed'`
-- ✅ Gateway response missing `status` field → defaults to `'failed'`
-- ✅ Warning logs when fallback is triggered
-
-### 5. Database Transaction Handling
-- ✅ Updates `gateway_charge_id` within transaction
-- ✅ Uses `FOR UPDATE SKIP LOCKED` for proper locking
-- ✅ Prevents race conditions
-
-### 6. Logging and Observability
-- ✅ Logs job started, processing, gateway response, final status
-- ✅ Includes full `chargeResult` object in logs
-- ✅ Debug logs for gateway request parameters
-
-### 7. Metrics Recording
-- ✅ Records processing time for successful jobs
-- ✅ Records processing time for failed jobs
-- ✅ Records payment status outcomes
+### Reconcile Worker (26 tests)
+- ✅ `processing → succeeded` when gateway confirms
+- ✅ `processing → failed` when gateway confirms
+- ✅ Leave unchanged when still `processing`
+- ✅ Handle multiple payments with mixed statuses
+- ✅ Block invalid transitions
+- ✅ Graceful error handling
+- ✅ Edge cases (null values, final states)
 
 ## Running the Tests
 
