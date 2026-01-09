@@ -197,15 +197,12 @@ const PaymentDetails: React.FC = () => {
       </div>
     );
   }
-Use displayStatus for all UI rendering
-  const currentDisplayStatus = displayStatus || payment?.status || PaymentStatus.PENDING;
-  
-  // Calculate timeline progress based on displayStatus
-  const steps = [PaymentStatus.PENDING, PaymentStatus.PROCESSING, PaymentStatus.SUCCEEDED];
-  const currentStepIndex = steps.indexOf(currentDisplayStatus === PaymentStatus.FAILED ? PaymentStatus.PENDING : currentDisplayStatus);
-  const isFailed = currentDisplaySlex-col items-center justify-center h-[50vh] text-center">
+
+  if (!payment) {
+    return (
+      <div className="flex flex-col items-center justify-center h-[50vh] text-center">
         <div className="bg-red-50 p-4 rounded-full mb-4">
-            <Server className="w-8 h-8 text-red-500" />
+          <Server className="w-8 h-8 text-red-500" />
         </div>
         <h2 className="text-xl font-bold text-slate-900">Payment Not Found</h2>
         <p className="text-slate-500 mt-2 max-w-md">
@@ -215,61 +212,59 @@ Use displayStatus for all UI rendering
       </div>
     );
   }
-currentDisplayStatus} size="md" showIcon={true} />
-               {/* Real-time connection indicator */}
-               {isConnected ? (
-                 <div className="flex items-center gap-1 text-xs text-emerald-600 bg-emerald-50 px-2 py-1 rounded-full">
-                   <Wifi className="w-3 h-3" />
-                   <span>Live</span>
-                 </div>
-               ) : (
-                 <div className="flex items-center gap-1 text-xs text-slate-400 bg-slate-100 px-2 py-1 rounded-full">
-                   <WifiOff className="w-3 h-3" />
-                   <span>Offline</span>
-                 </div>
-               )}
-               {/* Countdown indicator for processing state */}
-               {currentDisplaySwhite rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-        <div className="p-6 md:p-8 border-b border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-             <div className="flex items-center gap-3 mb-2">
-               <h1 className="text-2xl font-bold text-slate-900">Payment Details</h1>
-               <StatusBadge status={payment.status} size="md" showIcon={true} />
-               {/* Real-time connection indicator */}
-               {isConnected ? (
-                 <div className="flex items-center gap-1 text-xs text-emerald-600 bg-emerald-50 px-2 py-1 rounded-full">
-                   <Wifi className="w-3 h-3" />
-                   <span>Live</span>
-                 </div>
-               ) : (
-                 <div className="flex items-center gap-1 text-xs text-slate-400 bg-slate-100 px-2 py-1 rounded-full">
-                   <WifiOff className="w-3 h-3" />
-                   <span>Offline</span>
-                 </div>
-               )}
-               {/* Countdown indicator for processing state */}
-               {payment.status === PaymentStatus.PROCESSING && countdown !== null && (
-                 <div className="flex items-center gap-1 text-xs text-amber-700 bg-amber-50 px-3 py-1 rounded-full border border-amber-200 animate-pulse">
-                   <Loader2 className="w-3 h-3 animate-spin" />
-                   <span className="font-medium">Processing... ({countdown}s left)</span>
-                 </div>
-               )}
-             </div>
-             <p className="text-slate-500 flex items-center gap-2">
-               ID: <span className="font-mono text-slate-700 select-all">{payment.id}</span>
-             </p>
-          </div>
-          <div className="text-right">
-             <div className="text-3xl font-bold text-slate-900">
-               {new Intl.NumberFormat('en-US', { style: 'currency', currency: payment.currency }).format(payment.amount)}
-             </div>
-             <p className="text-slate-400 text-sm">Total Amount</p>
-          </div>
-        </div>
 
-        {/* Timeline */}
-        <div className="px-8 py-8 bg-slate-50 border-b border-slate-200">
-           <div className="relative flex items-center justify-between max-w-2xl mx-auto">
+  // Use displayStatus for all UI rendering
+  const currentDisplayStatus = displayStatus || payment?.status || PaymentStatus.PENDING;
+  
+  // Calculate timeline progress based on displayStatus
+  const steps = [PaymentStatus.PENDING, PaymentStatus.PROCESSING, PaymentStatus.SUCCEEDED];
+  const currentStepIndex = steps.indexOf(currentDisplayStatus === PaymentStatus.FAILED ? PaymentStatus.PENDING : currentDisplayStatus);
+  const isFailed = currentDisplayStatus === PaymentStatus.FAILED;
+
+  return (
+    <div className="p-4 md:p-8">
+      <div className="max-w-5xl mx-auto">
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+          <div className="p-6 md:p-8 border-b border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-3 mb-2">
+                <h1 className="text-2xl font-bold text-slate-900">Payment Details</h1>
+                <StatusBadge status={currentDisplayStatus} size="md" showIcon={true} />
+                {/* Real-time connection indicator */}
+                {isConnected ? (
+                  <div className="flex items-center gap-1 text-xs text-emerald-600 bg-emerald-50 px-2 py-1 rounded-full">
+                    <Wifi className="w-3 h-3" />
+                    <span>Live</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1 text-xs text-slate-400 bg-slate-100 px-2 py-1 rounded-full">
+                    <WifiOff className="w-3 h-3" />
+                    <span>Offline</span>
+                  </div>
+                )}
+                {/* Countdown indicator for processing state */}
+                {payment.status === PaymentStatus.PROCESSING && countdown !== null && (
+                  <div className="flex items-center gap-1 text-xs text-amber-700 bg-amber-50 px-3 py-1 rounded-full border border-amber-200 animate-pulse">
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    <span className="font-medium">Processing... ({countdown}s left)</span>
+                  </div>
+                )}
+              </div>
+              <p className="text-slate-500 flex items-center gap-2">
+                ID: <span className="font-mono text-slate-700 select-all">{payment.id}</span>
+              </p>
+            </div>
+            <div className="text-right">
+              <div className="text-3xl font-bold text-slate-900">
+                {new Intl.NumberFormat('en-US', { style: 'currency', currency: payment.currency }).format(payment.amount)}
+              </div>
+              <p className="text-slate-400 text-sm">Total Amount</p>
+            </div>
+          </div>
+
+          {/* Timeline */}
+          <div className="px-8 py-8 bg-slate-50 border-b border-slate-200">
+            <div className="relative flex items-center justify-between max-w-2xl mx-auto">
               {/* Progress Bar Background */}
               <div className="absolute left-0 top-1/2 -translate-y-1/2 w-full h-1 bg-slate-200 -z-10"></div>
               {/* Active Progress */}
@@ -299,98 +294,99 @@ currentDisplayStatus} size="md" showIcon={true} />
                   </div>
                 )
               })}
-           </div>
-        </div>
+            </div>
+          </div>
 
-        {/* Detail Grid */}
-        <div className="p-6 md:p-8 grid grid-cols-1 md:grid-cols-2 gap-8">
-           <div className="space-y-4">
+          {/* Detail Grid */}
+          <div className="p-6 md:p-8 grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div className="space-y-4">
               <h3 className="font-semibold text-slate-900 border-b border-slate-100 pb-2">Order Information</h3>
               
               <div className="flex items-start gap-4">
-                 <div className="p-2 bg-slate-100 rounded text-slate-500">
-                    <Hash className="w-5 h-5" />
-                 </div>
-                 <div>
-                    <p className="text-sm text-slate-500">Order Reference</p>
-                    <p className="font-medium text-slate-900">{payment.orderId}</p>
-                 </div>
+                <div className="p-2 bg-slate-100 rounded text-slate-500">
+                  <Hash className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="text-sm text-slate-500">Order Reference</p>
+                  <p className="font-medium text-slate-900">{payment.orderId}</p>
+                </div>
               </div>
 
               <div className="flex items-start gap-4">
-                 <div className="p-2 bg-slate-100 rounded text-slate-500">
-                    <CreditCard className="w-5 h-5" />
-                 </div>
-                 <div>
-                    <p className="text-sm text-slate-500">Gateway ID</p>
-                    <p className="font-medium text-slate-900 font-mono text-sm">
-                      {payment.gatewayId || 'Generating...'}
-                    </p>
-                 </div>
+                <div className="p-2 bg-slate-100 rounded text-slate-500">
+                  <CreditCard className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="text-sm text-slate-500">Gateway ID</p>
+                  <p className="font-medium text-slate-900 font-mono text-sm">
+                    {payment.gatewayId || 'Generating...'}
+                  </p>
+                </div>
               </div>
-           </div>
+            </div>
 
-           <div className="space-y-4">
+            <div className="space-y-4">
               <h3 className="font-semibold text-slate-900 border-b border-slate-100 pb-2">Timestamps</h3>
               
               <div className="flex items-start gap-4">
-                 <div className="p-2 bg-slate-100 rounded text-slate-500">
-                    <Calendar className="w-5 h-5" />
-                 </div>
-                 <div>
-                    <p className="text-sm text-slate-500">Created At</p>
-                    <p className="font-medium text-slate-900">
-                      {new Date(payment.createdAt).toLocaleString()}
-                    </p>
-                 </div>
+                <div className="p-2 bg-slate-100 rounded text-slate-500">
+                  <Calendar className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="text-sm text-slate-500">Created At</p>
+                  <p className="font-medium text-slate-900">
+                    {new Date(payment.createdAt).toLocaleString()}
+                  </p>
+                </div>
               </div>
 
-               <div className="flex items-start gap-4">
-                 <div className="p-2 bg-slate-100 rounded text-slate-500">
-                    <RefreshCw className="w-5 h-5" />
-                 </div>
-                 <div>
-                    <p className="text-sm text-slate-500">Last Updated</p>
-                    <p className="font-medium text-slate-900">
-                      {new Date(payment.updatedAt).toLocaleString()}
-                    </p>
-                 </div>
+              <div className="flex items-start gap-4">
+                <div className="p-2 bg-slate-100 rounded text-slate-500">
+                  <RefreshCw className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="text-sm text-slate-500">Last Updated</p>
+                  <p className="font-medium text-slate-900">
+                    {new Date(payment.updatedAt).toLocaleString()}
+                  </p>
+                </div>
               </div>
-           </div>
-        </div>
-        
-        {/* Real Audit Log */}
-        <div className="bg-slate-50 p-6 border-t border-slate-200">
-           <h3 className="text-sm font-semibold text-slate-900 mb-4 uppercase tracking-wider">Audit Log</h3>
-           {auditLog.length === 0 ? (
-             <div className="text-sm text-slate-400 italic">No audit entries found</div>
-           ) : (
-             <div className="space-y-3">
+            </div>
+          </div>
+          
+          {/* Real Audit Log */}
+          <div className="bg-slate-50 p-6 border-t border-slate-200">
+            <h3 className="text-sm font-semibold text-slate-900 mb-4 uppercase tracking-wider">Audit Log</h3>
+            {auditLog.length === 0 ? (
+              <div className="text-sm text-slate-400 italic">No audit entries found</div>
+            ) : (
+              <div className="space-y-3">
                 {auditLog.map((entry, idx) => (
                   <div key={idx} className="flex gap-4 text-sm">
-                     <span className="font-mono text-slate-400 w-32 shrink-0">
-                       {new Date(entry.timestamp).toLocaleString()}
-                     </span>
-                     <div className="flex-1">
-                       <span className={cn(
-                         "font-medium",
-                         entry.newStatus === 'succeeded' && "text-emerald-700",
-                         entry.newStatus === 'failed' && "text-red-700",
-                         entry.newStatus === 'processing' && "text-amber-700",
-                         entry.newStatus === 'pending' && "text-slate-700"
-                       )}>
-                         {entry.previousStatus} → {entry.newStatus}
-                       </span>
-                       {entry.metadata && (
-                         <div className="text-xs text-slate-500 mt-1">
-                           {JSON.stringify(entry.metadata)}
-                         </div>
-                       )}
-                     </div>
+                    <span className="font-mono text-slate-400 w-32 shrink-0">
+                      {new Date(entry.timestamp).toLocaleString()}
+                    </span>
+                    <div className="flex-1">
+                      <span className={cn(
+                        "font-medium",
+                        entry.newStatus === 'succeeded' && "text-emerald-700",
+                        entry.newStatus === 'failed' && "text-red-700",
+                        entry.newStatus === 'processing' && "text-amber-700",
+                        entry.newStatus === 'pending' && "text-slate-700"
+                      )}>
+                        {entry.previousStatus} → {entry.newStatus}
+                      </span>
+                      {entry.metadata && (
+                        <div className="text-xs text-slate-500 mt-1">
+                          {JSON.stringify(entry.metadata)}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 ))}
-             </div>
-           )}
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>
