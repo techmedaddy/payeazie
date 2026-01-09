@@ -1,6 +1,7 @@
 const paymentController = require('../controllers/payment.controller');
 const webhookController = require('../controllers/webhook.controller');
 const sseController = require('../controllers/sse.controller');
+const { authMiddleware } = require('../middleware/auth.middleware');
 
 /**
  * Backward compatibility for legacy controller method names
@@ -124,21 +125,30 @@ module.exports = async function paymentRoutes(fastify) {
   // List all payments with pagination and filtering
   fastify.get(
     '/payments',
-    { schema: listPaymentsSchema },
+    { 
+      schema: listPaymentsSchema,
+      preHandler: authMiddleware
+    },
     paymentController.listPayments
   );
   
   // Get single payment by ID
   fastify.get(
     '/payments/:paymentId',
-    { schema: getPaymentSchema },
+    { 
+      schema: getPaymentSchema,
+      preHandler: authMiddleware
+    },
     paymentController.getPaymentStatus
   );
   
   // Create new payment (simplified)
   fastify.post(
     '/payments',
-    { schema: createPaymentSchema },
+    { 
+      schema: createPaymentSchema,
+      preHandler: authMiddleware
+    },
     paymentController.createPayment
   );
   
@@ -149,19 +159,24 @@ module.exports = async function paymentRoutes(fastify) {
   // Create payment intent (with required idempotency key)
   fastify.post(
     '/payments/intents',
-    { schema: createIntentSchema },
+    { 
+      schema: createIntentSchema,
+      preHandler: authMiddleware
+    },
     paymentController.createIntent
   );
 
   // Get payment audit log
   fastify.get(
     '/payments/:paymentId/audit',
+    { preHandler: authMiddleware },
     paymentController.getPaymentAuditLog
   );
 
   // SSE endpoint for real-time payment status updates
   fastify.get(
     '/payments/:paymentId/stream',
+    { preHandler: authMiddleware },
     sseController.streamPaymentStatus
   );
 

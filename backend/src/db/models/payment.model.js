@@ -26,12 +26,14 @@ module.exports = {
             order_id, 
             idempotency_key, 
             amount, 
-            currency
+            currency,
+            user_id
         ) VALUES (
             ${'order_id'}, 
             ${'idempotency_key'}, 
             ${'amount'}, 
-            ${'currency'}
+            ${'currency'},
+            ${'user_id'}
         ) 
         ON CONFLICT (order_id, idempotency_key) DO NOTHING 
         RETURNING *

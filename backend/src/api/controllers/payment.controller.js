@@ -83,14 +83,14 @@ const createPaymentIntent = async (req, reply) => {
     }
 
     try {
-        logger.debug({ orderId, idempotencyKey }, 'createPaymentIntent: calling idempotency.resolve');
-        const record = await idempotencyService.resolve(orderId, idempotencyKey, amount, currency);
+        logger.debug({ orderId, idempotencyKey, userId: req.user?.id }, 'createPaymentIntent: calling idempotency.resolve');
+        const record = await idempotencyService.resolve(orderId, idempotencyKey, amount, currency, req.user?.id);
         
         // Record metrics
         metrics.recordPaymentCreated();
         metrics.recordPaymentStatus(record.status);
         
-        logger.info({ paymentId: record.id, status: record.status }, 'createPaymentIntent: success');
+        logger.info({ paymentId: record.id, status: record.status, userId: req.user?.id }, 'createPaymentIntent: success');
         const statusCode = record.status === 'processing' ? 202 : 200;
         const response = transformPaymentResponse(record);
         return sendResponse(reply, statusCode, response);
@@ -117,7 +117,7 @@ const getPaymentStatus = async (req, reply) => {
     const logger = require('../../utils/logger');
     const { paymentId } = req.params || {};
 
-    logger.info({ paymentId }, 'getPaymentStatus: incoming request');
+    logger.info({ paymentId, userId: req.user?.id }, 'getPaymentStatus: incoming request');
 
     if (!paymentId) {
         logger.warn('getPaymentStatus: missing paymentId');
@@ -131,6 +131,16 @@ const getPaymentStatus = async (req, reply) => {
         if (!payment) {
             logger.warn({ paymentId }, 'getPaymentStatus: payment not found');
             return sendResponse(reply, 404, { error: 'Payment not found' });
+        }
+        
+        // Check ownership (unless admin)
+        if (req.user && req.user.role !== 'admin' && payment.user_id !== req.user.id) {
+            logger.warn({ 
+                paymentId, 
+                userId: req.user.id, 
+                paymentUserId: payment.user_id 
+            }, 'getPaymentStatus: unauthorized access attempt');
+            return sendResponse(reply, 403, { error: 'Forbidden', message: 'You do not have permission to access this payment' });
         }
         
         logger.info({ paymentId, status: payment.status }, 'getPaymentStatus: success');
@@ -151,7 +161,7 @@ const getPaymentAuditLog = async (req, reply) => {
     const statusTransition = require('../../core/status-transition/status-transition.service');
     const { paymentId } = req.params || {};
 
-    logger.info({ paymentId }, 'getPaymentAuditLog: incoming request');
+    logger.info({ paymentId, userId: req.user?.id }, 'getPaymentAuditLog: incoming request');
 
     if (!paymentId) {
         logger.warn('getPaymentAuditLog: missing paymentId');
@@ -159,6 +169,24 @@ const getPaymentAuditLog = async (req, reply) => {
     }
 
     try {
+        // First, fetch payment to check ownership
+        const payment = await paymentOrchestrator.fetchStatus(paymentId);
+        
+        if (!payment) {
+            logger.warn({ paymentId }, 'getPaymentAuditLog: payment not found');
+            return sendResponse(reply, 404, { error: 'Payment not found' });
+        }
+        
+        // Check ownership (unless admin)
+        if (req.user && req.user.role !== 'admin' && payment.user_id !== req.user.id) {
+            logger.warn({ 
+                paymentId, 
+                userId: req.user.id, 
+                paymentUserId: payment.user_id 
+            }, 'getPaymentAuditLog: unauthorized access attempt');
+            return sendResponse(reply, 403, { error: 'Forbidden', message: 'You do not have permission to access this payment' });
+        }
+        
         const auditLog = await statusTransition.getAuditLog(paymentId);
         logger.info({ paymentId, count: auditLog.length }, 'getPaymentAuditLog: success');
         return sendResponse(reply, 200, { paymentId, auditLog });
@@ -198,15 +226,27 @@ const listPayments = async (req, reply) => {
     }
     
     try {
-        // Build query with optional status filter
+        // Build query with user_id filter and optional status filter
         let countQuery = 'SELECT COUNT(*) as total FROM payments';
         let dataQuery = 'SELECT * FROM payments';
         const params = [];
+        const conditions = [];
+        
+        // Filter by user_id unless user is admin
+        if (req.user && req.user.role !== 'admin') {
+            conditions.push('user_id = $' + (params.length + 1));
+            params.push(req.user.id);
+        }
         
         if (status) {
-            countQuery += ' WHERE status = $1';
-            dataQuery += ' WHERE status = $1';
+            conditions.push('status = $' + (params.length + 1));
             params.push(status);
+        }
+        
+        if (conditions.length > 0) {
+            const whereClause = ' WHERE ' + conditions.join(' AND ');
+            countQuery += whereClause;
+            dataQuery += whereClause;
         }
         
         dataQuery += ' ORDER BY created_at DESC LIMIT $' + (params.length + 1) + ' OFFSET $' + (params.length + 2);
@@ -214,7 +254,7 @@ const listPayments = async (req, reply) => {
         
         // Execute queries
         const [countResult, payments] = await Promise.all([
-            db.one(countQuery, status ? [status] : []),
+            db.one(countQuery, params.slice(0, -2)), // Count query doesn't need limit/offset
             db.any(dataQuery, params)
         ]);
         
@@ -225,7 +265,9 @@ const listPayments = async (req, reply) => {
             total, 
             page, 
             totalPages, 
-            returned: payments.length 
+            returned: payments.length,
+            userId: req.user?.id,
+            isAdmin: req.user?.role === 'admin'
         }, 'listPayments: success');
         
         return sendResponse(reply, 200, {

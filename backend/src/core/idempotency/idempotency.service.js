@@ -9,8 +9,8 @@ const UPSERT_PAYMENT_INTENT = `
         WHERE order_id = $1 AND idempotency_key = $2
     ),
     inserted AS (
-        INSERT INTO payments (order_id, idempotency_key, amount, currency)
-        SELECT $1, $2, $3, $4
+        INSERT INTO payments (order_id, idempotency_key, amount, currency, user_id)
+        SELECT $1, $2, $3, $4, $5
         WHERE NOT EXISTS (SELECT 1 FROM existing)
         RETURNING *, true AS created
     )
@@ -65,11 +65,11 @@ const enqueueChargeJob = async (paymentId) => {
 };
 
 class IdempotencyService {
-    static async createOrRetrieve({ orderId, idempotencyKey, amount, currency }) {
+    static async createOrRetrieve({ orderId, idempotencyKey, amount, currency, userId = null }) {
         try {
             assertPayload({ orderId, idempotencyKey, amount, currency });
 
-            logger.debug({ orderId, idempotencyKey, amount, currency }, 'idempotency.createOrRetrieve.start');
+            logger.debug({ orderId, idempotencyKey, amount, currency, userId }, 'idempotency.createOrRetrieve.start');
 
             const { payment, created } = await db.tx(async (t) => {
                 logger.debug('idempotency.createOrRetrieve.db.transaction.start');
@@ -78,6 +78,9 @@ class IdempotencyService {
                     orderId,
                     idempotencyKey,
                     amount,
+                    currency,
+                    userId
+                ]);
                     currency
                 ]);
 
@@ -130,8 +133,8 @@ class IdempotencyService {
 
 const idempotencyService = {
     createOrRetrieve: (params) => IdempotencyService.createOrRetrieve(params),
-    resolve: (orderId, idempotencyKey, amount, currency) =>
-        IdempotencyService.createOrRetrieve({ orderId, idempotencyKey, amount, currency }),
+    resolve: (orderId, idempotencyKey, amount, currency, userId = null) =>
+        IdempotencyService.createOrRetrieve({ orderId, idempotencyKey, amount, currency, userId }),
     IdempotencyConflictError,
     IdempotencyMismatchError: IdempotencyConflictError
 };

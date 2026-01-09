@@ -79,10 +79,11 @@ async function authMiddleware(req, reply) {
     req.user = {
       id: user.id,
       email: user.email,
-      name: user.name
+      name: user.name,
+      role: user.role || 'user'
     };
 
-    logger.debug({ userId: user.id, email: user.email }, 'User authenticated');
+    logger.debug({ userId: user.id, email: user.email, role: user.role }, 'User authenticated');
   } catch (error) {
     logger.error({ error }, 'Authentication error');
     return reply.code(500).send({

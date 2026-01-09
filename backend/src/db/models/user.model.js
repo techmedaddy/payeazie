@@ -8,18 +8,19 @@ class UserModel {
    * @param {string} userData.email - User email
    * @param {string} userData.passwordHash - Bcrypt hashed password
    * @param {string} [userData.name] - User name (optional)
+   * @param {string} [userData.role] - User role (default: 'user')
    * @returns {Promise<Object>} Created user (without password_hash)
    */
-  static async create({ email, passwordHash, name = null }) {
+  static async create({ email, passwordHash, name = null, role = 'user' }) {
     try {
       const result = await db.one(
-        `INSERT INTO users (email, password_hash, name)
-         VALUES ($1, $2, $3)
-         RETURNING id, email, name, created_at, updated_at`,
-        [email, passwordHash, name]
+        `INSERT INTO users (email, password_hash, name, role)
+         VALUES ($1, $2, $3, $4)
+         RETURNING id, email, name, role, created_at, updated_at`,
+        [email, passwordHash, name, role]
       );
       
-      logger.info({ userId: result.id, email }, 'User created');
+      logger.info({ userId: result.id, email, role }, 'User created');
       return result;
     } catch (error) {
       if (error.code === '23505') { // Unique violation
@@ -40,7 +41,7 @@ class UserModel {
   static async findByEmail(email) {
     try {
       const user = await db.oneOrNone(
-        'SELECT id, email, password_hash, name, created_at, updated_at FROM users WHERE email = $1',
+        'SELECT id, email, password_hash, name, role, created_at, updated_at FROM users WHERE email = $1',
         [email]
       );
       return user;
@@ -58,7 +59,7 @@ class UserModel {
   static async findById(id) {
     try {
       const user = await db.oneOrNone(
-        'SELECT id, email, name, created_at, updated_at FROM users WHERE id = $1',
+        'SELECT id, email, name, role, created_at, updated_at FROM users WHERE id = $1',
         [id]
       );
       return user;
