@@ -57,26 +57,13 @@ const PaymentDetails: React.FC = () => {
             setCountdown(30);
           }
         } else if (backendStatus === PaymentStatus.SUCCEEDED || backendStatus === PaymentStatus.FAILED) {
-          // Backend already in final state - stage the UI progression
-          setDisplayStatus(PaymentStatus.PROCESSING);
-          setFinalBackendStatus(backendStatus);
-          setProcessingStartTime(Date.now());
-          setCountdown(30);
-        }
-      }
-      // Detect transition from pending/processing to final state
-      else if (prevStatus && prevStatus !== backendStatus) {
-        if ((prevStatus === PaymentStatus.PENDING || prevStatus === PaymentStatus.PROCESSING) &&
-            (backendStatus === PaymentStatus.SUCCEEDED || backendStatus === PaymentStatus.FAILED)) {
-          // Backend transitioned to final state - stage the UI
-          setDisplayStatus(PaymentStatus.PROCESSING);
-          setFinalBackendStatus(backendStatus);
-          setProcessingStartTime(Date.now());
-          setCountdown(30);
-        } else {
-          // Other transitions - update immediately
+          // Backend already in final state - mirror it immediately
           setDisplayStatus(backendStatus);
         }
+      }
+      // Detect any status transition - always mirror backend truth
+      else if (prevStatus && prevStatus !== backendStatus) {
+        setDisplayStatus(backendStatus);
       }
       
       previousStatusRef.current = backendStatus;
