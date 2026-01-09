@@ -23,25 +23,18 @@ const CreatePayment: React.FC = () => {
     setLoading(true);
     setResponseDebug(null);
 
-    const idempotencyKey = generateUUID();
     const amount = parseFloat(formData.amount);
 
     try {
-      const response = await PaymentService.createPaymentIntent(
-        {
-          amount,
-          currency: formData.currency,
-          orderId: formData.orderId,
-        },
-        idempotencyKey
-      );
+      // Use new createPayment endpoint (auto-generates idempotency key)
+      const response = await PaymentService.createPayment({
+        amount,
+        currency: formData.currency,
+        orderId: formData.orderId,
+      });
 
       setResponseDebug(JSON.stringify(response, null, 2));
-      showToast('Payment intent created successfully', 'success');
-      
-      // Store ID locally for dashboard "history" mock
-      const existing = JSON.parse(localStorage.getItem('payeazie_recent_ids') || '[]');
-      localStorage.setItem('payeazie_recent_ids', JSON.stringify([...existing, response.id]));
+      showToast('Payment created successfully', 'success');
 
       // Brief delay to let user see the success state before redirecting
       setTimeout(() => {
@@ -59,8 +52,8 @@ const CreatePayment: React.FC = () => {
   return (
     <div className="max-w-3xl mx-auto">
       <div className="mb-8">
-        <h1 className="text-2xl font-bold text-slate-900">Create Payment Intent</h1>
-        <p className="text-slate-500 mt-2">Initialize a secure transaction. An idempotency key will be automatically generated.</p>
+        <h1 className="text-2xl font-bold text-slate-900">Create Payment</h1>
+        <p className="text-slate-500 mt-2">Create a new payment. Idempotency is handled automatically by the backend.</p>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -127,7 +120,7 @@ const CreatePayment: React.FC = () => {
                 disabled={loading}
                 className="w-full flex items-center justify-center gap-2 bg-brand-600 hover:bg-brand-700 text-white py-2.5 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Create Intent'}
+                {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Create Payment'}
                 {!loading && <ArrowRight className="w-4 h-4" />}
               </button>
             </div>
@@ -153,10 +146,10 @@ const CreatePayment: React.FC = () => {
            <div className="bg-white p-6 rounded-xl border border-slate-200 text-sm text-slate-600">
               <h3 className="font-semibold text-slate-900 mb-2">How it works</h3>
               <ul className="list-disc pl-5 space-y-2">
-                <li>A unique <strong>UUID v4</strong> is generated client-side.</li>
-                <li>Sent via <code className="bg-slate-100 px-1 rounded">Idempotency-Key</code> header.</li>
-                <li>Backend locks the key in Redis to prevent race conditions.</li>
-                <li>Ensures safe retries on network failure.</li>
+                <li>Backend auto-generates a <strong>UUID v4</strong> idempotency key.</li>
+                <li>Payment is queued for processing via BullMQ workers.</li>
+                <li>Status updates happen automatically (pending → processing → succeeded/failed).</li>
+                <li>View real-time status on the payment details page.</li>
               </ul>
            </div>
         </div>

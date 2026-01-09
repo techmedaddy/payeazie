@@ -11,6 +11,7 @@ import { usePaymentStream } from '../hooks/usePaymentStream';
 const PaymentDetails: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const [payment, setPayment] = useState<PaymentResponse | null>(null);
+  const [auditLog, setAuditLog] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const { showToast } = useToast();
@@ -40,8 +41,12 @@ const PaymentDetails: React.FC = () => {
     if (!id) return;
     if (!silent) setLoading(true);
     try {
-      const data = await PaymentService.getPaymentById(id);
+      const [data, audit] = await Promise.all([
+        PaymentService.getPaymentById(id),
+        PaymentService.getAuditLog(id),
+      ]);
       setPayment(data);
+      setAuditLog(audit);
       setError(false);
     } catch (err) {
       console.error(err);
@@ -214,33 +219,38 @@ const PaymentDetails: React.FC = () => {
            </div>
         </div>
         
-        {/* Mock Audit Log */}
+        {/* Real Audit Log */}
         <div className="bg-slate-50 p-6 border-t border-slate-200">
            <h3 className="text-sm font-semibold text-slate-900 mb-4 uppercase tracking-wider">Audit Log</h3>
-           <div className="space-y-3">
-              <div className="flex gap-4 text-sm">
-                 <span className="font-mono text-slate-400 w-20">{new Date(payment.createdAt).toLocaleTimeString()}</span>
-                 <span className="text-slate-700">Payment created via API</span>
-              </div>
-              {payment.status !== PaymentStatus.PENDING && (
-                 <div className="flex gap-4 text-sm">
-                   <span className="font-mono text-slate-400 w-20">{new Date(new Date(payment.createdAt).getTime() + 500).toLocaleTimeString()}</span>
-                   <span className="text-slate-700">Idempotency key locked</span>
-                </div>
-              )}
-               {payment.status === PaymentStatus.SUCCEEDED && (
-                 <div className="flex gap-4 text-sm">
-                   <span className="font-mono text-slate-400 w-20">{new Date(payment.updatedAt).toLocaleTimeString()}</span>
-                   <span className="text-emerald-700 font-medium">Payment authorized by gateway</span>
-                </div>
-              )}
-               {payment.status === PaymentStatus.FAILED && (
-                 <div className="flex gap-4 text-sm">
-                   <span className="font-mono text-slate-400 w-20">{new Date(payment.updatedAt).toLocaleTimeString()}</span>
-                   <span className="text-red-700 font-medium">Transaction declined</span>
-                </div>
-              )}
-           </div>
+           {auditLog.length === 0 ? (
+             <div className="text-sm text-slate-400 italic">No audit entries found</div>
+           ) : (
+             <div className="space-y-3">
+                {auditLog.map((entry, idx) => (
+                  <div key={idx} className="flex gap-4 text-sm">
+                     <span className="font-mono text-slate-400 w-32 shrink-0">
+                       {new Date(entry.timestamp).toLocaleString()}
+                     </span>
+                     <div className="flex-1">
+                       <span className={cn(
+                         "font-medium",
+                         entry.newStatus === 'succeeded' && "text-emerald-700",
+                         entry.newStatus === 'failed' && "text-red-700",
+                         entry.newStatus === 'processing' && "text-amber-700",
+                         entry.newStatus === 'pending' && "text-slate-700"
+                       )}>
+                         {entry.previousStatus} → {entry.newStatus}
+                       </span>
+                       {entry.metadata && (
+                         <div className="text-xs text-slate-500 mt-1">
+                           {JSON.stringify(entry.metadata)}
+                         </div>
+                       )}
+                     </div>
+                  </div>
+                ))}
+             </div>
+           )}
         </div>
       </div>
     </div>

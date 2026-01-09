@@ -1,6 +1,30 @@
 import { api } from './api';
 import { PaymentIntentRequest, PaymentResponse, PaymentStatus } from '../types';
 
+export interface PaymentListResponse {
+  data: PaymentResponse[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+    hasNext: boolean;
+    hasPrev: boolean;
+  };
+  filters: {
+    status: string;
+  };
+}
+
+export interface AuditLogEntry {
+  id: number;
+  paymentId: string;
+  previousStatus: string;
+  newStatus: string;
+  timestamp: string;
+  metadata?: any;
+}
+
 /**
  * Normalize backend status (lowercase) to frontend enum (uppercase)
  * Provides fallback for unknown statuses
@@ -36,7 +60,72 @@ function transformPaymentResponse(backendData: any): PaymentResponse {
   };
 }
 
+export interface PaymentListResponse {
+  data: PaymentResponse[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+    hasNext: boolean;
+    hasPrev: boolean;
+  };
+  filters: {
+    status: string;
+  };
+}
+
+export interface AuditLogEntry {
+  id: number;
+  paymentId: string;
+  previousStatus: string;
+  newStatus: string;
+  timestamp: string;
+  metadata?: any;
+}
+
 export const PaymentService = {
+  /**
+   * List payments with pagination and optional status filter
+   */
+  listPayments: async (
+    page: number = 1,
+    limit: number = 20,
+    status?: string
+  ): Promise<PaymentListResponse> => {
+    try {
+      const params = new URLSearchParams({
+        page: page.toString(),
+        limit: limit.toString(),
+      });
+      if (status && status !== 'all') {
+        params.append('status', status.toLowerCase());
+      }
+      const response = await api.get<any>(`/api/payments?${params.toString()}`);
+      return {
+        data: response.data.map(transformPaymentResponse),
+        pagination: response.pagination,
+        filters: response.filters,
+      };
+    } catch (err) {
+      console.error('PaymentService.listPayments failed', err);
+      throw err;
+    }
+  },
+
+  /**
+   * Creates a payment with auto-generated idempotency key
+   */
+  createPayment: async (data: PaymentIntentRequest): Promise<PaymentResponse> => {
+    try {
+      const response = await api.post<any>('/api/payments', data);
+      return transformPaymentResponse(response);
+    } catch (err) {
+      console.error('PaymentService.createPayment failed', err);
+      throw err;
+    }
+  },
+
   /**
    * Creates a payment intent with a specific idempotency key.
    */
@@ -69,5 +158,18 @@ export const PaymentService = {
       console.error(`PaymentService.getPaymentById failed for id=${id}`, err);
       throw err;
     }
-  }
+  },
+
+  /**
+   * Get audit log for a payment
+   */
+  getAuditLog: async (paymentId: string): Promise<AuditLogEntry[]> => {
+    try {
+      const response = await api.get<any>(`/api/payments/${paymentId}/audit-log`);
+      return response.auditLog || [];
+    } catch (err) {
+      console.error(`PaymentService.getAuditLog failed for id=${paymentId}`, err);
+      return [];
+    }
+  },
 };
