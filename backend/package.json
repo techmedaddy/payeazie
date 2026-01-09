@@ -28,6 +28,7 @@
     "@fastify/cors": "^11.1.0",
     "@fastify/formbody": "^8.0.2",
     "@fastify/helmet": "^13.0.2",
+    "@fastify/rate-limit": "^10.3.0",
     "bcryptjs": "^2.4.3",
     "bullmq": "^5.63.2",
     "dotenv": "^17.2.3",

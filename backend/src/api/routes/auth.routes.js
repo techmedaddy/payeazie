@@ -9,6 +9,7 @@ const { authMiddleware } = require('../middleware/auth.middleware');
 async function authRoutes(fastify, options) {
   // POST /auth/register - Register new user
   fastify.post('/register', {
+    config: { rateLimit: { max: 5, timeWindow: '1 hour' } },
     schema: {
       description: 'Register a new user account',
       tags: ['auth'],
@@ -79,6 +80,7 @@ async function authRoutes(fastify, options) {
 
   // POST /auth/login - Login user
   fastify.post('/login', {
+    config: { rateLimit: { max: 5, timeWindow: '1 hour' } },
     schema: {
       description: 'Login with email and password',
       tags: ['auth'],

@@ -118,6 +118,11 @@ function buildServer() {
     origin: true,
   });
 
+  // Rate limiting
+  const rateLimitPlugin = require('@fastify/rate-limit');
+  const { rateLimitOptions } = require('./src/api/middleware/rate-limit.middleware');
+  app.register(rateLimitPlugin, rateLimitOptions);
+
   // Basic health check (fast, non-blocking)
   app.get('/health', async (request, reply) => {
     return { 

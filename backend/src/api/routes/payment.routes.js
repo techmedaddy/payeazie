@@ -127,7 +127,8 @@ module.exports = async function paymentRoutes(fastify) {
     '/payments',
     { 
       schema: listPaymentsSchema,
-      preHandler: authMiddleware
+      preHandler: [authMiddleware],
+      config: { rateLimit: { max: 5, timeWindow: '1 hour' } }
     },
     paymentController.listPayments
   );
@@ -137,7 +138,8 @@ module.exports = async function paymentRoutes(fastify) {
     '/payments/:paymentId',
     { 
       schema: getPaymentSchema,
-      preHandler: authMiddleware
+      preHandler: [authMiddleware],
+      config: { rateLimit: { max: 5, timeWindow: '1 hour' } }
     },
     paymentController.getPaymentStatus
   );
@@ -147,7 +149,8 @@ module.exports = async function paymentRoutes(fastify) {
     '/payments',
     { 
       schema: createPaymentSchema,
-      preHandler: authMiddleware
+      preHandler: [authMiddleware],
+      config: { rateLimit: { max: 5, timeWindow: '1 hour' } }
     },
     paymentController.createPayment
   );
@@ -161,7 +164,8 @@ module.exports = async function paymentRoutes(fastify) {
     '/payments/intents',
     { 
       schema: createIntentSchema,
-      preHandler: authMiddleware
+      preHandler: [authMiddleware],
+      config: { rateLimit: { max: 5, timeWindow: '1 hour' } }
     },
     paymentController.createIntent
   );
