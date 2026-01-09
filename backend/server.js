@@ -15,6 +15,7 @@ const cors = require('@fastify/cors');
 const db = require('./src/db');
 
 const paymentRoutes = require('./src/api/routes/payment.routes');
+const authRoutes = require('./src/api/routes/auth.routes');
 const { queueClient } = require('./src/utils/queue');
 
 /**
@@ -92,7 +93,7 @@ require('./src/workers/reconcile.worker');
  * Environment validation
  */
 function ensureEnv() {
-  const required = ['DATABASE_URL', 'REDIS_URL'];
+  const required = ['DATABASE_URL', 'REDIS_URL', 'JWT_SECRET'];
   const missing = required.filter((key) => !process.env[key]);
 
   if (missing.length > 0) {
@@ -176,6 +177,7 @@ function buildServer() {
    * API routes
    */
   app.register(paymentRoutes, { prefix: '/api' });
+  app.register(authRoutes, { prefix: '/api/auth' });
 
   /**
    * Metrics endpoint for monitoring
