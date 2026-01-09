@@ -186,31 +186,6 @@ const PaymentDetails: React.FC = () => {
     };
   }, [processingStartTime, finalBackendStatus, payment?.status]);
 
-  // Polling effect
-      const elapsed = Math.floor((Date.now() - processingStartTime) / 1000);
-      const remaining = Math.max(0, 30 - elapsed);
-      setCountdown(remaining);
-      
-      if (remaining === 0) {
-        // Countdown finished, stop interval
-        if (countdownIntervalRef.current) {
-          clearInterval(countdownIntervalRef.current);
-          countdownIntervalRef.current = null;
-        }
-      }
-    };
-
-    updateCountdown();
-    countdownIntervalRef.current = setInterval(updateCountdown, 1000);
-
-    return () => {
-      if (countdownIntervalRef.current) {
-        clearInterval(countdownIntervalRef.current);
-        countdownIntervalRef.current = null;
-      }
-    };
-  }, [processingStartTime]);
-
   useEffect(() => {
     fetchPayment();
   }, [id]);
