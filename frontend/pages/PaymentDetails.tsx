@@ -14,7 +14,11 @@ const PaymentDetails: React.FC = () => {
   const [auditLog, setAuditLog] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [countdown, setCountdown] = useState<number | null>(null);
+  const [processingStartTime, setProcessingStartTime] = useState<number | null>(null);
   const { showToast } = useToast();
+  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null);
   
   // Use SSE for real-time status updates instead of polling
   const { isConnected, latestStatus } = usePaymentStream(id || null, {
@@ -48,6 +52,20 @@ const PaymentDetails: React.FC = () => {
       setPayment(data);
       setAuditLog(audit);
       setError(false);
+      
+      // Start countdown if payment just transitioned to processing
+      if (data.status === PaymentStatus.PROCESSING) {
+        if (!processingStartTime) {
+          // First time seeing processing status - start countdown
+          const startTime = Date.now();
+          setProcessingStartTime(startTime);
+          setCountdown(30);
+        }
+      } else {
+        // Payment is no longer processing - clear countdown
+        setProcessingStartTime(null);
+        setCountdown(null);
+      }
     } catch (err) {
       console.error(err);
       setError(true);
@@ -55,6 +73,69 @@ const PaymentDetails: React.FC = () => {
       if (!silent) setLoading(false);
     }
   };
+
+  // Polling effect - poll every 5 seconds when payment is processing
+  useEffect(() => {
+    if (!id) return;
+
+    // Clear any existing interval
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current);
+      pollingIntervalRef.current = null;
+    }
+
+    // Start polling if payment is in processing state
+    if (payment?.status === PaymentStatus.PROCESSING) {
+      console.log('Starting 5-second polling for payment:', id);
+      pollingIntervalRef.current = setInterval(() => {
+        fetchPayment(true);
+      }, 5000);
+    }
+
+    // Cleanup on unmount or when dependencies change
+    return () => {
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+        pollingIntervalRef.current = null;
+      }
+    };
+  }, [id, payment?.status]);
+
+  // Countdown effect - update countdown every second
+  useEffect(() => {
+    if (!processingStartTime) {
+      if (countdownIntervalRef.current) {
+        clearInterval(countdownIntervalRef.current);
+        countdownIntervalRef.current = null;
+      }
+      return;
+    }
+
+    // Update countdown immediately
+    const updateCountdown = () => {
+      const elapsed = Math.floor((Date.now() - processingStartTime) / 1000);
+      const remaining = Math.max(0, 30 - elapsed);
+      setCountdown(remaining);
+      
+      if (remaining === 0) {
+        // Countdown finished, stop interval
+        if (countdownIntervalRef.current) {
+          clearInterval(countdownIntervalRef.current);
+          countdownIntervalRef.current = null;
+        }
+      }
+    };
+
+    updateCountdown();
+    countdownIntervalRef.current = setInterval(updateCountdown, 1000);
+
+    return () => {
+      if (countdownIntervalRef.current) {
+        clearInterval(countdownIntervalRef.current);
+        countdownIntervalRef.current = null;
+      }
+    };
+  }, [processingStartTime]);
 
   useEffect(() => {
     fetchPayment();
@@ -112,6 +193,13 @@ const PaymentDetails: React.FC = () => {
                  <div className="flex items-center gap-1 text-xs text-slate-400 bg-slate-100 px-2 py-1 rounded-full">
                    <WifiOff className="w-3 h-3" />
                    <span>Offline</span>
+                 </div>
+               )}
+               {/* Countdown indicator for processing state */}
+               {payment.status === PaymentStatus.PROCESSING && countdown !== null && (
+                 <div className="flex items-center gap-1 text-xs text-amber-700 bg-amber-50 px-3 py-1 rounded-full border border-amber-200 animate-pulse">
+                   <Loader2 className="w-3 h-3 animate-spin" />
+                   <span className="font-medium">Processing... ({countdown}s left)</span>
                  </div>
                )}
              </div>
