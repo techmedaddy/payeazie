@@ -1,0 +1,22 @@
+-- Migration: Change order_id from UUID to TEXT to support custom order IDs like ORD-1234
+-- This is safe to run multiple times (idempotent)
+
+-- Drop the existing unique index first
+DROP INDEX IF EXISTS idx_payments_order_idempotency;
+
+-- Alter the column type from UUID to TEXT
+-- This will work if there are no rows, or if existing rows can be cast to TEXT
+ALTER TABLE payments 
+ALTER COLUMN order_id TYPE TEXT USING order_id::TEXT;
+
+-- Recreate the unique index
+CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_order_idempotency 
+ON payments (order_id, idempotency_key);
+
+-- Verify the change
+SELECT 
+    column_name, 
+    data_type, 
+    character_maximum_length
+FROM information_schema.columns
+WHERE table_name = 'payments' AND column_name = 'order_id';

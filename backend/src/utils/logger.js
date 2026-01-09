@@ -2,10 +2,11 @@ const pino = require('pino');
 const { v4: uuidv4 } = require('uuid');
 
 const isProduction = process.env.NODE_ENV === 'production';
+const isDevelopment = !isProduction;
 
 // Base options common to all environments
 const baseOptions = {
-  level: process.env.LOG_LEVEL || 'info',
+  level: process.env.LOG_LEVEL || (isDevelopment ? 'debug' : 'info'),
   formatters: {
     level: (label) => ({ level: label.toUpperCase() }),
     bindings: (bindings) => ({
@@ -16,9 +17,9 @@ const baseOptions = {
   },
 };
 
-// Development: pretty print if pino-pretty is installed
+// Development: pretty print for human readability
 let devOptions = {};
-if (!isProduction) {
+if (isDevelopment) {
   try {
     require.resolve('pino-pretty');
     devOptions = {
@@ -28,18 +29,30 @@ if (!isProduction) {
           colorize: true,
           translateTime: 'yyyy-mm-dd HH:MM:ss',
           ignore: 'pid,hostname',
+          singleLine: false,
+          levelFirst: true,
+          messageFormat: '{levelLabel} - {msg}',
         },
       },
     };
   } catch (err) {
-    // Fallback to plain logs if pino-pretty is missing
-    console.warn('⚠️ pino-pretty not installed, using plain logs');
+    // Fallback: structured but readable format without pino-pretty
+    console.warn('⚠️  pino-pretty not installed, using plain structured logs');
+    console.warn('   Install with: npm install --save-dev pino-pretty');
   }
 }
 
-// Production: ISO timestamp, JSON logs
+// Production: ISO timestamp, JSON logs, optimized for log aggregation
 const prodOptions = isProduction
-  ? { timestamp: pino.stdTimeFunctions.isoTime }
+  ? {
+      timestamp: pino.stdTimeFunctions.isoTime,
+      messageKey: 'message',
+      errorKey: 'error',
+      base: {
+        env: process.env.NODE_ENV,
+        app: 'payeazie-backend',
+      },
+    }
   : {};
 
 const logger = pino({
