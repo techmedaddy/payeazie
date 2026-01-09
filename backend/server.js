@@ -123,6 +123,10 @@ function buildServer() {
   const { rateLimitOptions } = require('./src/api/middleware/rate-limit.middleware');
   app.register(rateLimitPlugin, rateLimitOptions);
 
+  // Initialize Passport for OAuth
+  const { initializeGoogleStrategy } = require('./src/utils/passport.config');
+  initializeGoogleStrategy();
+
   // Basic health check (fast, non-blocking)
   app.get('/health', async (request, reply) => {
     return { 

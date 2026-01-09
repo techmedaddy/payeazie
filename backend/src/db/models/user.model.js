@@ -6,21 +6,22 @@ class UserModel {
    * Create a new user
    * @param {Object} userData - User data
    * @param {string} userData.email - User email
-   * @param {string} userData.passwordHash - Bcrypt hashed password
+   * @param {string} [userData.passwordHash] - Bcrypt hashed password (optional for OAuth)
    * @param {string} [userData.name] - User name (optional)
    * @param {string} [userData.role] - User role (default: 'user')
+   * @param {string} [userData.googleId] - Google OAuth ID (optional)
    * @returns {Promise<Object>} Created user (without password_hash)
    */
-  static async create({ email, passwordHash, name = null, role = 'user' }) {
+  static async create({ email, passwordHash = null, name = null, role = 'user', googleId = null }) {
     try {
       const result = await db.one(
-        `INSERT INTO users (email, password_hash, name, role)
-         VALUES ($1, $2, $3, $4)
-         RETURNING id, email, name, role, created_at, updated_at`,
-        [email, passwordHash, name, role]
+        `INSERT INTO users (email, password_hash, name, role, google_id)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING id, email, name, role, google_id, created_at, updated_at`,
+        [email, passwordHash, name, role, googleId]
       );
       
-      logger.info({ userId: result.id, email, role }, 'User created');
+      logger.info({ userId: result.id, email, role, googleId: !!googleId }, 'User created');
       return result;
     } catch (error) {
       if (error.code === '23505') { // Unique violation
@@ -41,12 +42,30 @@ class UserModel {
   static async findByEmail(email) {
     try {
       const user = await db.oneOrNone(
-        'SELECT id, email, password_hash, name, role, created_at, updated_at FROM users WHERE email = $1',
+        'SELECT id, email, password_hash, name, role, google_id, created_at, updated_at FROM users WHERE email = $1',
         [email]
       );
       return user;
     } catch (error) {
       logger.error({ error, email }, 'Error finding user by email');
+      throw error;
+    }
+  }
+
+  /**
+   * Find user by Google ID
+   * @param {string} googleId - Google OAuth ID
+   * @returns {Promise<Object|null>} User object or null
+   */
+  static async findByGoogleId(googleId) {
+    try {
+      const user = await db.oneOrNone(
+        'SELECT id, email, password_hash, name, role, google_id, created_at, updated_at FROM users WHERE google_id = $1',
+        [googleId]
+      );
+      return user;
+    } catch (error) {
+      logger.error({ error, googleId }, 'Error finding user by Google ID');
       throw error;
     }
   }
@@ -59,7 +78,7 @@ class UserModel {
   static async findById(id) {
     try {
       const user = await db.oneOrNone(
-        'SELECT id, email, name, role, created_at, updated_at FROM users WHERE id = $1',
+        'SELECT id, email, name, role, google_id, created_at, updated_at FROM users WHERE id = $1',
         [id]
       );
       return user;
@@ -96,6 +115,11 @@ class UserModel {
         values.push(updates.passwordHash);
       }
 
+      if (updates.googleId !== undefined) {
+        fields.push(`google_id = $${paramIndex++}`);
+        values.push(updates.googleId);
+      }
+
       if (fields.length === 0) {
         throw new Error('No fields to update');
       }
@@ -105,7 +129,7 @@ class UserModel {
         `UPDATE users 
          SET ${fields.join(', ')}
          WHERE id = $${paramIndex}
-         RETURNING id, email, name, created_at, updated_at`,
+         RETURNING id, email, name, google_id, created_at, updated_at`,
         values
       );
 

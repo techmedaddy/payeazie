@@ -1,6 +1,9 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const UserModel = require('../../db/models/user.model');
+const PasswordResetModel = require('../../db/models/password-reset.model');
+const emailService = require('../../utils/email.service');
+const { passport, isGoogleOAuthConfigured } = require('../../utils/passport.config');
 const logger = require('../../utils/logger');
 
 /**
@@ -227,8 +230,255 @@ async function me(req, reply) {
   }
 }
 
+/**
+ * POST /auth/forgot-password
+ * Request a password reset token
+ */
+async function forgotPassword(req, reply) {
+  try {
+    const { email } = req.body;
+
+    // Validate required field
+    if (!email) {
+      return reply.code(400).send({
+        error: 'Validation Error',
+        message: 'Email is required'
+      });
+    }
+
+    // Validate email format
+    if (!isValidEmail(email)) {
+      return reply.code(400).send({
+        error: 'Validation Error',
+        message: 'Invalid email format'
+      });
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+
+    // Find user by email
+    const user = await UserModel.findByEmail(normalizedEmail);
+
+    // Security: Don't reveal if email exists or not
+    // Always return success to prevent email enumeration
+    if (!user) {
+      logger.warn({ email: normalizedEmail }, 'Password reset requested for non-existent email');
+      // Still return success to avoid revealing account existence
+      return reply.code(200).send({
+        success: true,
+        message: 'If an account exists with this email, a password reset link has been sent.'
+      });
+    }
+
+    // Create password reset token (expires in 15 minutes)
+    const resetRecord = await PasswordResetModel.create(user.id, 15);
+
+    // Send email with reset token
+    try {
+      await emailService.sendPasswordResetEmail(
+        user.email,
+        resetRecord.token,
+        user.name
+      );
+
+      logger.info({ 
+        userId: user.id, 
+        email: user.email,
+        resetId: resetRecord.id 
+      }, 'Password reset email sent successfully');
+    } catch (emailError) {
+      logger.error({ 
+        error: emailError.message,
+        userId: user.id,
+        email: user.email 
+      }, 'Failed to send password reset email');
+
+      // If email fails, delete the token
+      await PasswordResetModel.deleteByUserId(user.id);
+
+      return reply.code(500).send({
+        error: 'Internal Server Error',
+        message: 'Failed to send password reset email. Please try again later.'
+      });
+    }
+
+    return reply.code(200).send({
+      success: true,
+      message: 'If an account exists with this email, a password reset link has been sent.'
+    });
+  } catch (error) {
+    logger.error({ error, body: req.body }, 'Forgot password error');
+    return reply.code(500).send({
+      error: 'Internal Server Error',
+      message: 'Failed to process password reset request'
+    });
+  }
+}
+
+/**
+ * POST /auth/reset-password
+ * Reset password using token
+ */
+async function resetPassword(req, reply) {
+  try {
+    const { token, newPassword } = req.body;
+
+    // Validate required fields
+    if (!token || !newPassword) {
+      return reply.code(400).send({
+        error: 'Validation Error',
+        message: 'Token and new password are required'
+      });
+    }
+
+    // Validate password strength
+    if (!isValidPassword(newPassword)) {
+      return reply.code(400).send({
+        error: 'Validation Error',
+        message: 'Password must be at least 8 characters long'
+      });
+    }
+
+    // Validate token
+    const validation = await PasswordResetModel.validateToken(token);
+
+    if (!validation.valid) {
+      logger.warn({ error: validation.error }, 'Invalid password reset attempt');
+      return reply.code(400).send({
+        error: 'Invalid Token',
+        message: validation.error || 'Invalid or expired token'
+      });
+    }
+
+    // Hash new password
+    const saltRounds = 10;
+    const passwordHash = await bcrypt.hash(newPassword, saltRounds);
+
+    // Update user's password
+    await UserModel.update(validation.userId, { passwordHash });
+
+    // Mark token as used
+    await PasswordResetModel.markAsUsed(token);
+
+    // Delete all other unused tokens for this user (security measure)
+    await PasswordResetModel.deleteByUserId(validation.userId);
+
+    // Get user info for confirmation email
+    const user = await UserModel.findById(validation.userId);
+
+    // Send confirmation email (non-blocking, don't fail if it doesn't send)
+    if (user) {
+      emailService.sendPasswordResetConfirmation(user.email, user.name)
+        .catch(err => {
+          logger.warn({ 
+            error: err.message,
+            userId: user.id 
+          }, 'Failed to send password reset confirmation email');
+        });
+    }
+
+    logger.info({ 
+      userId: validation.userId,
+      resetId: validation.resetId 
+    }, 'Password reset successful');
+
+    return reply.code(200).send({
+      success: true,
+      message: 'Password has been reset successfully. You can now log in with your new password.'
+    });
+  } catch (error) {
+    logger.error({ error }, 'Reset password error');
+    return reply.code(500).send({
+      error: 'Internal Server Error',
+      message: 'Failed to reset password'
+    });
+  }
+}
+
+/**
+ * GET /auth/google
+ * Initiate Google OAuth flow
+ */
+async function googleAuth(req, reply) {
+  if (!isGoogleOAuthConfigured()) {
+    return reply.code(503).send({
+      error: 'Service Unavailable',
+      message: 'Google OAuth is not configured on this server'
+    });
+  }
+
+  // This will be handled by passport middleware
+  // Just return a message if called directly
+  return reply.code(200).send({
+    message: 'Redirecting to Google OAuth...'
+  });
+}
+
+/**
+ * GET /auth/google/callback
+ * Handle Google OAuth callback
+ */
+async function googleAuthCallback(req, reply) {
+  try {
+    // User is attached by passport middleware
+    const user = req.user;
+
+    if (!user) {
+      logger.error('Google OAuth callback: No user attached');
+      
+      // Redirect to frontend with error
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+      return reply.redirect(`${frontendUrl}/login?error=oauth_failed`);
+    }
+
+    // Generate JWT token
+    const token = generateToken(user.id);
+
+    logger.info({ userId: user.id, email: user.email }, 'Google OAuth successful');
+
+    // Redirect to frontend with token
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    return reply.redirect(`${frontendUrl}/oauth/callback?token=${token}`);
+  } catch (error) {
+    logger.error({ error }, 'Google OAuth callback error');
+    
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    return reply.redirect(`${frontendUrl}/login?error=oauth_error`);
+  }
+}
+
+/**
+ * Passport authenticate middleware wrapper for Fastify
+ */
+function createPassportAuthenticator(strategy, options = {}) {
+  return (req, reply) => {
+    return new Promise((resolve, reject) => {
+      passport.authenticate(strategy, options, (err, user, info) => {
+        if (err) {
+          logger.error({ error: err.message, strategy }, 'Passport authentication error');
+          return reject(err);
+        }
+        
+        if (!user) {
+          logger.warn({ strategy, info }, 'Passport authentication failed - no user');
+          return resolve(null);
+        }
+
+        // Attach user to request
+        req.user = user;
+        resolve(user);
+      })(req, reply);
+    });
+  };
+}
+
 module.exports = {
   register,
   login,
-  me
+  me,
+  forgotPassword,
+  resetPassword,
+  googleAuth,
+  googleAuthCallback,
+  createPassportAuthenticator,
 };
