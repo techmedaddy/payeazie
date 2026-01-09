@@ -62,12 +62,29 @@ const worker = createWorker('payment_charge', async (job) => {
                     currency: payment.currency,
                     idempotencyKey: payment.idempotency_key
                 });
+                
+                // Log detailed gateway response for debugging
                 logger.info({ 
                     paymentId, 
                     chargeId: chargeResult?.id, 
                     gatewayStatus: chargeResult?.status,
-                    fullResponse: chargeResult 
-                }, 'charge.worker gateway responded');
+                    hasId: !!chargeResult?.id,
+                    hasStatus: !!chargeResult?.status,
+                    responseType: typeof chargeResult,
+                    fullResponse: JSON.stringify(chargeResult)
+                }, '✅ charge.worker: gateway responded');
+                
+                // Validate response structure
+                if (!chargeResult || typeof chargeResult !== 'object') {
+                    throw new Error('Gateway returned invalid response (not an object)');
+                }
+                if (!chargeResult.id) {
+                    throw new Error('Gateway response missing charge ID');
+                }
+                if (!chargeResult.status) {
+                    logger.warn({ paymentId, chargeResult }, '⚠️ Gateway response missing status, defaulting to failed');
+                    chargeResult.status = 'failed';
+                }
             } catch (gatewayErr) {
                 logger.error({ paymentId, error: gatewayErr.message }, 'charge.worker gateway failed');
 
@@ -102,18 +119,30 @@ const worker = createWorker('payment_charge', async (job) => {
             return;
         }
         
-        // Ensure we have a valid chargeResult
+        // Ensure we have a valid chargeResult with status
         if (!chargeResult) {
-            logger.warn({ paymentId }, 'charge.worker: chargeResult is null/undefined, defaulting to failed');
+            logger.error({ paymentId }, '❌ charge.worker: chargeResult is null/undefined - this should not happen');
+            throw new Error('chargeResult is missing after gateway call');
         }
         
-        const finalStatus = chargeResult?.status || 'failed';
+        // Extract status with explicit fallback to 'failed'
+        let finalStatus = chargeResult.status;
+        if (!finalStatus || (finalStatus !== 'succeeded' && finalStatus !== 'failed')) {
+            logger.warn({ 
+                paymentId, 
+                receivedStatus: chargeResult.status,
+                chargeId: chargeResult.id
+            }, '⚠️ Invalid/missing status from gateway, defaulting to failed');
+            finalStatus = 'failed';
+        }
+        
         logger.info({ 
             paymentId, 
-            chargeResultExists: !!chargeResult, 
-            gatewayStatus: chargeResult?.status,
-            finalStatus 
-        }, 'charge.worker: determining final status');
+            chargeId: chargeResult.id,
+            gatewayStatus: chargeResult.status,
+            finalStatus,
+            willTransitionTo: finalStatus
+        }, '🔄 charge.worker: using gateway status for final transition');
 
         try {
             await statusTransition.transitionStatus(paymentId, finalStatus, {
