@@ -7,6 +7,12 @@ const gatewayClient = require('../utils/gateway-client');
 const metrics = require('../utils/metrics');
 const statusTransition = require('../core/status-transition/status-transition.service');
 
+/**
+ * Sleep helper for demo purposes
+ * Adds artificial delay to show status transitions in action
+ */
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
 const DEFAULT_WINDOW_MINUTES = 30;
 const FINAL_STATUSES = new Set(['succeeded', 'failed', 'refunded']);
 
@@ -103,6 +109,17 @@ const reconcilePayment = async (payment, jobId = null) => {
 
         // Use statusTransition service to update (writes to audit log)
         try {
+            // DEMO: Add 30-second delay when transitioning from processing to final status
+            if (payment.status === 'processing' && (remote.status === 'succeeded' || remote.status === 'failed')) {
+                logger.info({ 
+                    paymentId: payment.id, 
+                    currentStatus: payment.status,
+                    newStatus: remote.status 
+                }, '⏳ Waiting 30 seconds before final transition (demo mode)');
+                await sleep(30000);
+                logger.info({ paymentId: payment.id, newStatus: remote.status }, '✓ Delay complete, proceeding with reconciliation');
+            }
+            
             await statusTransition.transitionStatus(payment.id, remote.status, {
                 worker: 'reconcile.worker',
                 jobId: jobId,

@@ -7,6 +7,12 @@ const gatewayClient = require('../utils/gateway-client');
 const metrics = require('../utils/metrics');
 const statusTransition = require('../core/status-transition/status-transition.service');
 
+/**
+ * Sleep helper for demo purposes
+ * Adds artificial delay to show status transitions in action
+ */
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
 if (!process.env.REDIS_URL) {
     logger.error('charge.worker missing REDIS_URL');
     process.exit(1);
@@ -143,6 +149,11 @@ const worker = createWorker('payment_charge', async (job) => {
             finalStatus,
             willTransitionTo: finalStatus
         }, '🔄 charge.worker: using gateway status for final transition');
+
+        // DEMO: Add 30-second delay to showcase status transitions
+        logger.info({ paymentId, finalStatus }, '⏳ Waiting 30 seconds before final transition (demo mode)');
+        await sleep(30000);
+        logger.info({ paymentId, finalStatus }, '✓ Delay complete, proceeding with final transition');
 
         try {
             await statusTransition.transitionStatus(paymentId, finalStatus, {
