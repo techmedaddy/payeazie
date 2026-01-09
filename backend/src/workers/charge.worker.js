@@ -48,7 +48,9 @@ const worker = createWorker('payment_charge', async (job) => {
             }
 
             if (payment.gateway_charge_id) {
-                logger.info({ paymentId, existingChargeId: payment.gateway_charge_id }, 'charge.worker already processed');
+                logger.info({ paymentId, existingChargeId: payment.gateway_charge_id }, 'charge.worker already processed - skipping');
+                // Mark chargeResult so we can skip final transition
+                chargeResult = { alreadyProcessed: true };
                 return;
             }
 
@@ -93,6 +95,13 @@ const worker = createWorker('payment_charge', async (job) => {
         });
 
         // Step 2: Transition to the actual gateway status
+        // Skip if already processed (idempotency check returned early)
+        if (chargeResult?.alreadyProcessed) {
+            logger.info({ paymentId }, 'charge.worker: skipping final transition (already processed)');
+            metrics.recordWorkerJob('charge', true);
+            return;
+        }
+        
         // Ensure we have a valid chargeResult
         if (!chargeResult) {
             logger.warn({ paymentId }, 'charge.worker: chargeResult is null/undefined, defaulting to failed');
