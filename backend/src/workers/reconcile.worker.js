@@ -126,7 +126,7 @@ const reconcilePayment = async (payment, jobId = null) => {
                 chargeId: payment.gateway_charge_id,
                 reason: `Reconciliation: gateway status is ${remote.status}`,
                 previousStatus: payment.status
-            });
+            }, null, 'worker');
             
             logger.info({
                 paymentId: payment.id,

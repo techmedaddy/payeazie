@@ -37,7 +37,7 @@ const canTransition = (current, next) => {
 const fetchPaymentForUpdate = (t, paymentId) =>
     t.oneOrNone('SELECT * FROM payments WHERE id = $1 FOR UPDATE', [paymentId]);
 
-const applyStatus = async (paymentId, status, metadata = {}) => {
+const applyStatus = async (paymentId, status, metadata = {}, userId = null, triggeredBy = 'system') => {
     if (!paymentId) {
         throw new Error('paymentId is required');
     }
@@ -46,7 +46,7 @@ const applyStatus = async (paymentId, status, metadata = {}) => {
     }
 
     // Delegate to status transition service which handles audit logs and events
-    return statusTransitionService.transitionStatus(paymentId, status, metadata);
+    return statusTransitionService.transitionStatus(paymentId, status, metadata, userId, triggeredBy);
 };
 
 const attachGatewayCharge = async (paymentId, chargeId, status) => {
@@ -92,7 +92,8 @@ const fetchStatus = async (paymentId) => {
     return payment;
 };
 
-const transitionStatus = (paymentId, newStatus) => applyStatus(paymentId, newStatus);
+const transitionStatus = (paymentId, newStatus, metadata = {}, userId = null, triggeredBy = 'user') => 
+    applyStatus(paymentId, newStatus, metadata, userId, triggeredBy);
 
 const applyGatewayResult = (paymentId, gatewayResult = {}) => {
     if (!gatewayResult.status && !gatewayResult.id) {

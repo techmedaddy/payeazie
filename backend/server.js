@@ -16,6 +16,8 @@ const db = require('./src/db');
 
 const paymentRoutes = require('./src/api/routes/payment.routes');
 const authRoutes = require('./src/api/routes/auth.routes');
+const auditRoutes = require('./src/api/routes/audit.routes');
+const { requestLogger } = require('./src/api/middleware/request-logger.middleware');
 const { queueClient } = require('./src/utils/queue');
 
 /**
@@ -127,6 +129,9 @@ function buildServer() {
   const { initializeGoogleStrategy } = require('./src/utils/passport.config');
   initializeGoogleStrategy();
 
+  // Request logging middleware (applied globally)
+  app.addHook('preHandler', requestLogger);
+
   // Basic health check (fast, non-blocking)
   app.get('/health', async (request, reply) => {
     return { 
@@ -187,6 +192,7 @@ function buildServer() {
    */
   app.register(paymentRoutes, { prefix: '/api' });
   app.register(authRoutes, { prefix: '/api/auth' });
+  app.register(auditRoutes, { prefix: '/api' });
 
   /**
    * Metrics endpoint for monitoring

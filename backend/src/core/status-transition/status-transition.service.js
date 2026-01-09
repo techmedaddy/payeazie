@@ -94,18 +94,20 @@ const emitStatusEvent = async (paymentId, fromStatus, toStatus, metadata = {}) =
 /**
  * Create an audit log entry for a status transition
  */
-const createAuditLog = async (t, paymentId, fromStatus, toStatus, metadata = {}) => {
+const createAuditLog = async (t, paymentId, fromStatus, toStatus, metadata = {}, userId = null, triggeredBy = 'system') => {
     try {
         await t.none(
-            `INSERT INTO payment_audit_log (payment_id, from_status, to_status, metadata)
-             VALUES ($1, $2, $3, $4)`,
-            [paymentId, fromStatus, toStatus, metadata]
+            `INSERT INTO payment_audit_log (payment_id, from_status, to_status, metadata, user_id, triggered_by)
+             VALUES ($1, $2, $3, $4, $5, $6)`,
+            [paymentId, fromStatus, toStatus, metadata, userId, triggeredBy]
         );
         
         logger.debug({ 
             paymentId, 
             fromStatus, 
-            toStatus 
+            toStatus,
+            userId,
+            triggeredBy
         }, 'status-transition: audit log created');
     } catch (err) {
         logger.error({ 
@@ -122,9 +124,11 @@ const createAuditLog = async (t, paymentId, fromStatus, toStatus, metadata = {})
  * @param {string} paymentId - The payment ID
  * @param {string} toStatus - The target status
  * @param {object} metadata - Optional metadata about the transition
+ * @param {string|null} userId - The user ID who triggered the transition (null for system)
+ * @param {string} triggeredBy - Who/what triggered the transition ('user', 'worker', 'system')
  * @returns {Promise<object>} The updated payment record
  */
-const transitionStatus = async (paymentId, toStatus, metadata = {}) => {
+const transitionStatus = async (paymentId, toStatus, metadata = {}, userId = null, triggeredBy = 'system') => {
     if (!paymentId) {
         throw new Error('paymentId is required');
     }
@@ -132,7 +136,7 @@ const transitionStatus = async (paymentId, toStatus, metadata = {}) => {
         throw new Error('toStatus is required');
     }
 
-    logger.info({ paymentId, toStatus, metadata }, 'status-transition: starting transition');
+    logger.info({ paymentId, toStatus, metadata, userId, triggeredBy }, 'status-transition: starting transition');
 
     return db.tx(async (t) => {
         // Lock the payment row for update
@@ -170,12 +174,14 @@ const transitionStatus = async (paymentId, toStatus, metadata = {}) => {
         );
 
         // Create audit log entry within the transaction
-        await createAuditLog(t, paymentId, fromStatus, toStatus, metadata);
+        await createAuditLog(t, paymentId, fromStatus, toStatus, metadata, userId, triggeredBy);
 
         logger.info({ 
             paymentId, 
             fromStatus, 
-            toStatus 
+            toStatus,
+            userId,
+            triggeredBy
         }, 'status-transition: transition completed');
 
         // Emit event after transaction commits (outside the transaction)

@@ -36,7 +36,7 @@ const worker = createWorker('payment_charge', async (job) => {
             worker: 'charge.worker',
             jobId: job.id,
             reason: 'Worker acquired job lock'
-        });
+        }, null, 'worker');
         logger.info({ paymentId }, 'charge.worker: transitioned to processing');
 
         // Declare chargeResult outside transaction so it's accessible later
@@ -161,7 +161,7 @@ const worker = createWorker('payment_charge', async (job) => {
                 jobId: job.id,
                 chargeId: chargeResult?.id,
                 reason: `Gateway charge completed with status: ${finalStatus}`
-            });
+            }, null, 'worker');
             logger.info({ 
                 paymentId, 
                 finalStatus,
@@ -198,7 +198,7 @@ const worker = createWorker('payment_charge', async (job) => {
                 jobId: job.id,
                 reason: 'Gateway charge failed',
                 error: err.message
-            });
+            }, null, 'worker');
             logger.info({ paymentId, auditLogWritten: true }, '✅ charge.worker: transitioned to failed (error handler)');
             metrics.recordPaymentStatus('failed');
         } catch (transitionErr) {
