@@ -78,22 +78,79 @@ const getPaymentSchema = {
 };
 
 /**
+ * Payment list query schema
+ */
+const listPaymentsSchema = {
+  querystring: {
+    type: 'object',
+    properties: {
+      page: { type: 'integer', minimum: 1, default: 1 },
+      limit: { type: 'integer', minimum: 1, maximum: 100, default: 20 },
+      status: { 
+        type: 'string', 
+        enum: ['pending', 'processing', 'succeeded', 'failed', 'refunded'] 
+      }
+    }
+  }
+};
+
+/**
+ * Create payment schema (simplified, idempotency key optional)
+ */
+const createPaymentSchema = {
+  body: {
+    type: 'object',
+    required: ['orderId', 'amount', 'currency'],
+    properties: {
+      orderId: { type: 'string', minLength: 1 },
+      amount: { type: 'number', minimum: 0.01 },
+      currency: { type: 'string', minLength: 3, maxLength: 3 }
+    },
+    additionalProperties: false
+  }
+};
+
+/**
  * Routes
  * NOTE: `/api` prefix is applied in server.js
  */
 module.exports = async function paymentRoutes(fastify) {
   const { queueClient } = require('../../utils/queue');
 
-  fastify.post(
-    '/payments/intents',
-    { schema: createIntentSchema },
-    paymentController.createIntent
+  // ============================================
+  // REST API Endpoints
+  // ============================================
+  
+  // List all payments with pagination and filtering
+  fastify.get(
+    '/payments',
+    { schema: listPaymentsSchema },
+    paymentController.listPayments
   );
-
+  
+  // Get single payment by ID
   fastify.get(
     '/payments/:paymentId',
     { schema: getPaymentSchema },
     paymentController.getPaymentStatus
+  );
+  
+  // Create new payment (simplified)
+  fastify.post(
+    '/payments',
+    { schema: createPaymentSchema },
+    paymentController.createPayment
+  );
+  
+  // ============================================
+  // Legacy/Additional Endpoints
+  // ============================================
+
+  // Create payment intent (with required idempotency key)
+  fastify.post(
+    '/payments/intents',
+    { schema: createIntentSchema },
+    paymentController.createIntent
   );
 
   // Get payment audit log

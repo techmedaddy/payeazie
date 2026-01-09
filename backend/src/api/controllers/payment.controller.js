@@ -22,12 +22,32 @@ const transformPaymentResponse = (payment) => {
 };
 
 const validateIntentFields = ({ orderId, amount, currency, idempotencyKey }) => {
-    const missing = [];
-    if (!orderId) missing.push('orderId');
-    if (amount === undefined || amount === null) missing.push('amount');
-    if (!currency) missing.push('currency');
-    if (!idempotencyKey) missing.push('Idempotency-Key');
-    return missing;
+    const errors = [];
+    
+    // Required field validation
+    if (!orderId || typeof orderId !== 'string') {
+        errors.push({ field: 'orderId', message: 'orderId is required and must be a string' });
+    }
+    
+    if (amount === undefined || amount === null) {
+        errors.push({ field: 'amount', message: 'amount is required' });
+    } else if (typeof amount !== 'number') {
+        errors.push({ field: 'amount', message: 'amount must be a number' });
+    } else if (amount <= 0) {
+        errors.push({ field: 'amount', message: 'amount must be greater than 0' });
+    }
+    
+    if (!currency || typeof currency !== 'string') {
+        errors.push({ field: 'currency', message: 'currency is required and must be a string' });
+    } else if (currency.length !== 3) {
+        errors.push({ field: 'currency', message: 'currency must be exactly 3 characters (e.g., USD, EUR)' });
+    }
+    
+    if (!idempotencyKey || typeof idempotencyKey !== 'string') {
+        errors.push({ field: 'idempotency-key', message: 'Idempotency-Key header is required' });
+    }
+    
+    return errors;
 };
 
 const createPaymentIntent = async (req, reply) => {
@@ -52,11 +72,14 @@ const createPaymentIntent = async (req, reply) => {
         amountType: typeof amount
     }, 'createPaymentIntent: extracted fields');
 
-    const missing = validateIntentFields({ orderId, amount, currency, idempotencyKey });
+    const validationErrors = validateIntentFields({ orderId, amount, currency, idempotencyKey });
 
-    if (missing.length) {
-        logger.warn({ missing }, 'createPaymentIntent: missing fields');
-        return sendResponse(reply, 400, { error: `Missing required fields: ${missing.join(', ')}` });
+    if (validationErrors.length > 0) {
+        logger.warn({ errors: validationErrors }, 'createPaymentIntent: validation failed');
+        return sendResponse(reply, 400, { 
+            error: 'Validation failed', 
+            details: validationErrors 
+        });
     }
 
     try {
@@ -149,8 +172,164 @@ const getPaymentAuditLog = async (req, reply) => {
     }
 };
 
+/**
+ * List payments with pagination and optional status filter
+ * Query params: page (default: 1), limit (default: 20, max: 100), status (optional)
+ */
+const listPayments = async (req, reply) => {
+    const logger = require('../../utils/logger');
+    const db = require('../../db');
+    
+    // Extract and validate query parameters
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+    const status = req.query.status || null;
+    const offset = (page - 1) * limit;
+    
+    logger.info({ page, limit, status }, 'listPayments: incoming request');
+    
+    // Validate status filter if provided
+    const validStatuses = ['pending', 'processing', 'succeeded', 'failed', 'refunded'];
+    if (status && !validStatuses.includes(status)) {
+        return sendResponse(reply, 400, { 
+            error: 'Invalid status filter',
+            details: `status must be one of: ${validStatuses.join(', ')}`
+        });
+    }
+    
+    try {
+        // Build query with optional status filter
+        let countQuery = 'SELECT COUNT(*) as total FROM payments';
+        let dataQuery = 'SELECT * FROM payments';
+        const params = [];
+        
+        if (status) {
+            countQuery += ' WHERE status = $1';
+            dataQuery += ' WHERE status = $1';
+            params.push(status);
+        }
+        
+        dataQuery += ' ORDER BY created_at DESC LIMIT $' + (params.length + 1) + ' OFFSET $' + (params.length + 2);
+        params.push(limit, offset);
+        
+        // Execute queries
+        const [countResult, payments] = await Promise.all([
+            db.one(countQuery, status ? [status] : []),
+            db.any(dataQuery, params)
+        ]);
+        
+        const total = parseInt(countResult.total);
+        const totalPages = Math.ceil(total / limit);
+        
+        logger.info({ 
+            total, 
+            page, 
+            totalPages, 
+            returned: payments.length 
+        }, 'listPayments: success');
+        
+        return sendResponse(reply, 200, {
+            data: payments.map(transformPaymentResponse),
+            pagination: {
+                page,
+                limit,
+                total,
+                totalPages,
+                hasNext: page < totalPages,
+                hasPrev: page > 1
+            },
+            filters: {
+                status: status || 'all'
+            }
+        });
+    } catch (err) {
+        logger.error({
+            error: err.message,
+            stack: err.stack,
+            page,
+            limit,
+            status,
+            name: err.name,
+            code: err.code
+        }, 'listPayments: error caught');
+        return sendResponse(reply, 500, { error: 'Unable to list payments', details: err.message });
+    }
+};
+
+/**
+ * Create payment (simplified version of createPaymentIntent)
+ * Uses auto-generated idempotency key if not provided
+ */
+const createPayment = async (req, reply) => {
+    const logger = require('../../utils/logger');
+    const { v4: uuidv4 } = require('uuid');
+    
+    const { orderId, amount, currency } = req.body || {};
+    let idempotencyKey = req.headers['idempotency-key'];
+    
+    // Auto-generate idempotency key if not provided (for simple POST /api/payments)
+    if (!idempotencyKey) {
+        idempotencyKey = uuidv4();
+        logger.debug({ idempotencyKey }, 'createPayment: auto-generated idempotency key');
+    }
+    
+    logger.info({
+        orderId,
+        amount,
+        currency,
+        hasIdempotencyKey: !!req.headers['idempotency-key']
+    }, 'createPayment: incoming request');
+    
+    // Validate fields (idempotency key is now always present)
+    const validationErrors = validateIntentFields({ orderId, amount, currency, idempotencyKey });
+    
+    if (validationErrors.length > 0) {
+        logger.warn({ errors: validationErrors }, 'createPayment: validation failed');
+        return sendResponse(reply, 400, { 
+            error: 'Validation failed', 
+            details: validationErrors 
+        });
+    }
+    
+    try {
+        const record = await idempotencyService.resolve(orderId, idempotencyKey, amount, currency);
+        
+        metrics.recordPaymentCreated();
+        metrics.recordPaymentStatus(record.status);
+        
+        logger.info({ 
+            paymentId: record.id, 
+            status: record.status,
+            idempotencyKey 
+        }, 'createPayment: success');
+        
+        const response = transformPaymentResponse(record);
+        return sendResponse(reply, 201, response);
+    } catch (err) {
+        logger.error({
+            error: err.message,
+            stack: err.stack,
+            orderId
+        }, 'createPayment: error caught');
+        
+        if (err.name === 'IdempotencyConflictError') {
+            return sendResponse(reply, 409, { 
+                error: 'Idempotency conflict',
+                details: err.message 
+            });
+        }
+        
+        return sendResponse(reply, 500, { 
+            error: 'Unable to create payment', 
+            details: err.message 
+        });
+    }
+};
+
 module.exports = {
     createPaymentIntent,
+    createPayment,
     getPaymentStatus,
-    getPaymentAuditLog
+    getPaymentAuditLog,
+    listPayments
 };
