@@ -5,6 +5,7 @@ const db = require('../db');
 const logger = require('../utils/logger');
 const gatewayClient = require('../utils/gateway-client');
 const metrics = require('../utils/metrics');
+const statusTransition = require('../core/status-transition/status-transition.service');
 
 const DEFAULT_WINDOW_MINUTES = 30;
 const FINAL_STATUSES = new Set(['succeeded', 'failed', 'refunded']);
@@ -44,21 +45,39 @@ const fetchNonFinalPayments = () => {
 
 /**
  * Reconcile a single payment by checking its status with the gateway
+ * This catches payments that got stuck in 'processing' state
  */
-const reconcilePayment = async (payment) => {
+const reconcilePayment = async (payment, jobId = null) => {
     try {
-        logger.debug({ paymentId: payment.id, currentStatus: payment.status }, 'reconcile.worker reconciling payment');
+        logger.debug({ 
+            paymentId: payment.id, 
+            currentStatus: payment.status,
+            gatewayChargeId: payment.gateway_charge_id
+        }, '🔍 reconcile.worker: checking payment');
 
+        // Query the gateway for the latest status
         const remote = await gatewayClient.lookup(payment.gateway_charge_id);
 
         if (!remote || !remote.status) {
-            logger.warn({ paymentId: payment.id, chargeId: payment.gateway_charge_id }, 'reconcile.worker missing gateway record');
+            logger.warn({ 
+                paymentId: payment.id, 
+                chargeId: payment.gateway_charge_id 
+            }, '⚠️ reconcile.worker: gateway returned no status');
             return;
         }
 
+        logger.debug({
+            paymentId: payment.id,
+            localStatus: payment.status,
+            gatewayStatus: remote.status
+        }, 'reconcile.worker: gateway status retrieved');
+
         // Skip if status hasn't changed
         if (remote.status === payment.status) {
-            logger.debug({ paymentId: payment.id, status: payment.status }, 'reconcile.worker status unchanged');
+            logger.debug({ 
+                paymentId: payment.id, 
+                status: payment.status 
+            }, 'reconcile.worker: status unchanged, skipping');
             return;
         }
 
@@ -68,70 +87,94 @@ const reconcilePayment = async (payment) => {
                 paymentId: payment.id,
                 currentStatus: payment.status,
                 attemptedStatus: remote.status
-            }, 'reconcile.worker invalid status transition blocked');
+            }, '⚠️ reconcile.worker: invalid transition blocked');
             return;
         }
 
         // Skip if both are in final states (edge case)
         if (FINAL_STATUSES.has(payment.status) && FINAL_STATUSES.has(remote.status)) {
-            logger.debug({ paymentId: payment.id }, 'reconcile.worker both in final state');
+            logger.debug({ 
+                paymentId: payment.id,
+                currentStatus: payment.status,
+                newStatus: remote.status
+            }, 'reconcile.worker: both statuses are final, skipping');
             return;
         }
 
-        // Update payment status
-        await db.tx(async t => {
-            await t.none(
-                `UPDATE payments
-                 SET status = $2,
-                     updated_at = NOW()
-                 WHERE id = $1`,
-                [payment.id, remote.status]
-            );
-        });
-
-        logger.info({
-            paymentId: payment.id,
-            oldStatus: payment.status,
-            newStatus: remote.status
-        }, 'reconcile.worker updated status');
-        
-        // Record the reconciliation update
-        metrics.recordReconciliationUpdate();
-        metrics.recordPaymentStatus(remote.status);
+        // Use statusTransition service to update (writes to audit log)
+        try {
+            await statusTransition.transitionStatus(payment.id, remote.status, {
+                worker: 'reconcile.worker',
+                jobId: jobId,
+                chargeId: payment.gateway_charge_id,
+                reason: `Reconciliation: gateway status is ${remote.status}`,
+                previousStatus: payment.status
+            });
+            
+            logger.info({
+                paymentId: payment.id,
+                oldStatus: payment.status,
+                newStatus: remote.status,
+                auditLogWritten: true
+            }, '✅ reconcile.worker: status updated via gateway lookup');
+            
+            metrics.recordReconciliationUpdate();
+            metrics.recordPaymentStatus(remote.status);
+        } catch (transitionErr) {
+            logger.error({
+                paymentId: payment.id,
+                error: transitionErr.message,
+                stack: transitionErr.stack
+            }, '❌ reconcile.worker: status transition failed');
+            throw transitionErr;
+        }
     } catch (err) {
         logger.error({
             paymentId: payment.id,
             error: err.message,
             stack: err.stack
-        }, 'reconcile.worker payment reconciliation failed');
+        }, '❌ reconcile.worker: payment reconciliation failed');
         // Don't throw - continue with other payments
     }
 };
 
 const worker = createWorker('payment_reconcile', async (job) => {
     const startTime = Date.now();
-    logger.info({ jobId: job?.id }, 'reconcile.worker job started');
+    const jobId = job?.id || 'manual';
+    logger.info({ jobId }, '🔄 reconcile.worker: job started');
 
     try {
         const candidates = await fetchNonFinalPayments();
 
         if (!candidates.length) {
-            logger.info('reconcile.worker no candidates for reconciliation');
+            logger.info('reconcile.worker: no stuck payments found');
             metrics.recordWorkerJob('reconcile', true, Date.now() - startTime);
             return;
         }
 
-        logger.info({ count: candidates.length }, 'reconcile.worker found candidates');
+        logger.info({ 
+            count: candidates.length,
+            statuses: candidates.map(p => p.status)
+        }, '🔍 reconcile.worker: found stuck payments');
 
         // Process each payment
+        let successCount = 0;
         for (const payment of candidates) {
-            await reconcilePayment(payment);
+            await reconcilePayment(payment, jobId);
+            successCount++;
         }
 
-        logger.info({ processed: candidates.length }, 'reconcile.worker job completed');
+        logger.info({ 
+            processed: successCount,
+            total: candidates.length 
+        }, '✅ reconcile.worker: job completed');
         metrics.recordWorkerJob('reconcile', true, Date.now() - startTime);
     } catch (err) {
-        logger.error({ error: err.message, stack: err.stack, jobId: job?.id }, 'reconcile.worker job failed');
+        logger.error({ 
+            error: err.message, 
+            stack: err.stack, 
+            jobId 
+        }, '❌ reconcile.worker: job failed');
         metrics.recordWorkerJob('reconcile', false, Date.now() - startTime);
         throw err;
     }

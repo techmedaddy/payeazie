@@ -151,22 +151,35 @@ const worker = createWorker('payment_charge', async (job) => {
                 chargeId: chargeResult?.id,
                 reason: `Gateway charge completed with status: ${finalStatus}`
             });
-            logger.info({ paymentId, finalStatus }, `charge.worker: transitioned to ${finalStatus}`);
+            logger.info({ 
+                paymentId, 
+                finalStatus,
+                chargeId: chargeResult.id,
+                auditLogWritten: true
+            }, `✅ charge.worker: transitioned to ${finalStatus}`);
             metrics.recordPaymentStatus(finalStatus);
         } catch (transitionErr) {
             logger.error({ 
                 paymentId, 
                 finalStatus, 
                 error: transitionErr.message, 
-                stack: transitionErr.stack 
-            }, 'charge.worker: CRITICAL - failed to transition to final status');
+                stack: transitionErr.stack,
+                errorCode: transitionErr.code,
+                chargeId: chargeResult?.id
+            }, '❌ charge.worker: CRITICAL - failed to transition to final status');
+            
+            // Check if it's an audit log table issue
+            if (transitionErr.message?.includes('payment_audit_log')) {
+                logger.error({ paymentId }, '❌ payment_audit_log table missing or inaccessible');
+            }
+            
             throw transitionErr;
         }
 
         const processingTime = Date.now() - startTime;
         metrics.recordWorkerJob('charge', true, processingTime);
     } catch (err) {
-        logger.error({ paymentId, error: err.message, stack: err.stack }, 'charge.worker job failed');
+        logger.error({ paymentId, error: err.message, stack: err.stack }, '❌ charge.worker job failed');
 
         try {
             await statusTransition.transitionStatus(paymentId, 'failed', {
@@ -175,10 +188,14 @@ const worker = createWorker('payment_charge', async (job) => {
                 reason: 'Gateway charge failed',
                 error: err.message
             });
-            logger.info({ paymentId }, 'charge.worker: transitioned to failed');
+            logger.info({ paymentId, auditLogWritten: true }, '✅ charge.worker: transitioned to failed (error handler)');
             metrics.recordPaymentStatus('failed');
         } catch (transitionErr) {
-            logger.error({ paymentId, error: transitionErr.message }, 'charge.worker: failed to transition to failed status');
+            logger.error({ 
+                paymentId, 
+                error: transitionErr.message,
+                originalError: err.message
+            }, '❌ charge.worker: failed to transition to failed status');
         }
 
         metrics.recordWorkerJob('charge', false, Date.now() - startTime);
