@@ -81,8 +81,6 @@ class IdempotencyService {
                     currency,
                     userId
                 ]);
-                    currency
-                ]);
 
                 logger.debug({ row }, 'idempotency.createOrRetrieve.db.upsert.result');
 
