@@ -200,6 +200,56 @@ All configuration via environment variables. See [src/utils/config.js](./src/uti
 | `ENABLE_METRICS` | `false` | Periodic metrics logging |
 | `METRICS_LOG_INTERVAL` | `60000` | Metrics log interval (ms) |
 
+## 🎭 Demo & Verification
+
+### Quick Demo Setup
+
+Seed the database with sample payments for demos:
+
+```bash
+# Seed demo payments (succeeded, failed, processing)
+node scripts/seed-payments.js
+```
+
+This creates 8 demo payments with various statuses:
+- 3 succeeded payments
+- 2 failed payments
+- 2 processing payments (potentially stuck)
+- 1 pending payment
+
+### Find Stuck Payments
+
+Check for payments that are stuck in processing state:
+
+```bash
+# Find payments stuck in processing for > 5 minutes
+node scripts/find-stuck.js
+```
+
+This script:
+- Identifies stuck payments
+- Shows payment details and time stuck
+- Provides recommended troubleshooting actions
+- Displays overall payment status summary
+
+### Restart & Verify System
+
+Stop and restart the backend with full health verification:
+
+```bash
+# Restart backend and verify workers
+./scripts/restart-and-verify.sh
+```
+
+This script:
+- Stops existing backend processes
+- Starts fresh backend server
+- Waits for server readiness
+- Checks `/health` endpoint
+- Creates a test payment
+- Monitors worker processing
+- Verifies final payment status
+
 ## 🧪 Testing
 
 ### Manual Testing
