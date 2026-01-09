@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { PaymentService } from '../services/payments';
 import { PaymentResponse, PaymentStatus } from '../types';
@@ -14,34 +14,22 @@ const PaymentDetails: React.FC = () => {
   const [auditLog, setAuditLog] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [displayStatus, setDisplayStatus] = useState<PaymentStatus | null>(null);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [processingStartTime, setProcessingStartTime] = useState<number | null>(null);
+  const [finalBackendStatus, setFinalBackendStatus] = useState<PaymentStatus | null>(null);
   const { showToast } = useToast();
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const previousStatusRef = useRef<PaymentStatus | null>(null);
+  const displayStatusRef = useRef<PaymentStatus | null>(null);
   
-  // Use SSE for real-time status updates instead of polling
-  const { isConnected, latestStatus } = usePaymentStream(id || null, {
-    onStatusChange: (event) => {
-      console.log('Status changed:', event);
-      // Refetch payment details when status changes
-      if (id) {
-        fetchPayment(true);
-      }
-    },
-    onError: (err) => {
-      console.error('SSE error:', err);
-      // Fall back to manual refresh on error
-    },
-    onConnect: () => {
-      console.log('SSE connected for payment:', id);
-    },
-    onDisconnect: () => {
-      console.log('SSE disconnected for payment:', id);
-    },
-  });
-
-  const fetchPayment = async (silent = false) => {
+  // Keep displayStatusRef in sync
+  useEffect(() => {
+    displayStatusRef.current = displayStatus;
+  }, [displayStatus]);
+  
+  const fetchPayment = useCallback(async (silent = false) => {
     if (!id) return;
     if (!silent) setLoading(true);
     try {
@@ -53,28 +41,72 @@ const PaymentDetails: React.FC = () => {
       setAuditLog(audit);
       setError(false);
       
-      // Start countdown if payment just transitioned to processing
-      if (data.status === PaymentStatus.PROCESSING) {
-        if (!processingStartTime) {
-          // First time seeing processing status - start countdown
-          const startTime = Date.now();
-          setProcessingStartTime(startTime);
+      const backendStatus = data.status;
+      const prevStatus = previousStatusRef.current;
+      const currentDisplayStatus = displayStatusRef.current;
+      
+      // Initialize display status on first load
+      if (!currentDisplayStatus) {
+        if (backendStatus === PaymentStatus.PENDING) {
+          setDisplayStatus(PaymentStatus.PENDING);
+        } else if (backendStatus === PaymentStatus.PROCESSING) {
+          setDisplayStatus(PaymentStatus.PROCESSING);
+          // Start countdown for actual backend processing
+          if (!processingStartTime) {
+            setProcessingStartTime(Date.now());
+            setCountdown(30);
+          }
+        } else if (backendStatus === PaymentStatus.SUCCEEDED || backendStatus === PaymentStatus.FAILED) {
+          // Backend already in final state - stage the UI progression
+          setDisplayStatus(PaymentStatus.PROCESSING);
+          setFinalBackendStatus(backendStatus);
+          setProcessingStartTime(Date.now());
           setCountdown(30);
         }
-      } else {
-        // Payment is no longer processing - clear countdown
-        setProcessingStartTime(null);
-        setCountdown(null);
       }
+      // Detect transition from pending/processing to final state
+      else if (prevStatus && prevStatus !== backendStatus) {
+        if ((prevStatus === PaymentStatus.PENDING || prevStatus === PaymentStatus.PROCESSING) &&
+            (backendStatus === PaymentStatus.SUCCEEDED || backendStatus === PaymentStatus.FAILED)) {
+          // Backend transitioned to final state - stage the UI
+          setDisplayStatus(PaymentStatus.PROCESSING);
+          setFinalBackendStatus(backendStatus);
+          setProcessingStartTime(Date.now());
+          setCountdown(30);
+        } else {
+          // Other transitions - update immediately
+          setDisplayStatus(backendStatus);
+        }
+      }
+      
+      previousStatusRef.current = backendStatus;
+      
     } catch (err) {
       console.error(err);
       setError(true);
     } finally {
       if (!silent) setLoading(false);
     }
-  };
+  }, [id]);
 
-  // Polling effect - poll every 5 seconds when payment is processing
+  // Use SSE for real-time status updates
+  const { isConnected, latestStatus } = usePaymentStream(id || null, {
+    onStatusChange: (event) => {
+      // SSE status change detected
+    },
+    onError: (err) => {
+      // SSE error
+    },
+    onConnect: () => {
+      // SSE connected
+    },
+    onDisconnect: () => {
+      // SSE disconnected
+    },
+  });
+
+  // Polling effect - DISABLED to prevent infinite loops
+  // Poll every 5 seconds when backend is processing or UI is staging
   useEffect(() => {
     if (!id) return;
 
@@ -84,13 +116,18 @@ const PaymentDetails: React.FC = () => {
       pollingIntervalRef.current = null;
     }
 
-    // Start polling if payment is in processing state
-    if (payment?.status === PaymentStatus.PROCESSING) {
-      console.log('Starting 5-second polling for payment:', id);
+    // POLLING DISABLED - only fetch once on mount
+    // Uncomment below to enable polling when needed
+    /*
+    const shouldPoll = payment?.status === PaymentStatus.PROCESSING || 
+                       (displayStatus === PaymentStatus.PROCESSING && !finalBackendStatus);
+    
+    if (shouldPoll) {
       pollingIntervalRef.current = setInterval(() => {
         fetchPayment(true);
       }, 5000);
     }
+    */
 
     // Cleanup on unmount or when dependencies change
     return () => {
@@ -99,9 +136,9 @@ const PaymentDetails: React.FC = () => {
         pollingIntervalRef.current = null;
       }
     };
-  }, [id, payment?.status]);
+  }, [id, fetchPayment]);
 
-  // Countdown effect - update countdown every second
+  // Countdown effect - update countdown every second and reveal final status when done
   useEffect(() => {
     if (!processingStartTime) {
       if (countdownIntervalRef.current) {
@@ -113,6 +150,43 @@ const PaymentDetails: React.FC = () => {
 
     // Update countdown immediately
     const updateCountdown = () => {
+      const elapsed = Math.floor((Date.now() - processingStartTime) / 1000);
+      const remaining = Math.max(0, 30 - elapsed);
+      setCountdown(remaining);
+      
+      if (remaining === 0) {
+        // Countdown finished - reveal final status if we have it
+        if (finalBackendStatus) {
+          setDisplayStatus(finalBackendStatus);
+          setFinalBackendStatus(null);
+        } else if (payment?.status && payment.status !== PaymentStatus.PROCESSING) {
+          // Backend completed during countdown
+          setDisplayStatus(payment.status);
+        }
+        
+        // Stop countdown
+        setProcessingStartTime(null);
+        setCountdown(null);
+        
+        if (countdownIntervalRef.current) {
+          clearInterval(countdownIntervalRef.current);
+          countdownIntervalRef.current = null;
+        }
+      }
+    };
+
+    updateCountdown();
+    countdownIntervalRef.current = setInterval(updateCountdown, 1000);
+
+    return () => {
+      if (countdownIntervalRef.current) {
+        clearInterval(countdownIntervalRef.current);
+        countdownIntervalRef.current = null;
+      }
+    };
+  }, [processingStartTime, finalBackendStatus, payment?.status]);
+
+  // Polling effect
       const elapsed = Math.floor((Date.now() - processingStartTime) / 1000);
       const remaining = Math.max(0, 30 - elapsed);
       setCountdown(remaining);
@@ -148,10 +222,13 @@ const PaymentDetails: React.FC = () => {
       </div>
     );
   }
-
-  if (error || !payment) {
-    return (
-      <div className="flex flex-col items-center justify-center h-[50vh] text-center">
+Use displayStatus for all UI rendering
+  const currentDisplayStatus = displayStatus || payment?.status || PaymentStatus.PENDING;
+  
+  // Calculate timeline progress based on displayStatus
+  const steps = [PaymentStatus.PENDING, PaymentStatus.PROCESSING, PaymentStatus.SUCCEEDED];
+  const currentStepIndex = steps.indexOf(currentDisplayStatus === PaymentStatus.FAILED ? PaymentStatus.PENDING : currentDisplayStatus);
+  const isFailed = currentDisplaySlex-col items-center justify-center h-[50vh] text-center">
         <div className="bg-red-50 p-4 rounded-full mb-4">
             <Server className="w-8 h-8 text-red-500" />
         </div>
@@ -163,21 +240,21 @@ const PaymentDetails: React.FC = () => {
       </div>
     );
   }
-
-  // Calculate timeline progress
-  const steps = [PaymentStatus.PENDING, PaymentStatus.PROCESSING, PaymentStatus.SUCCEEDED];
-  const currentStepIndex = steps.indexOf(payment.status === PaymentStatus.FAILED ? PaymentStatus.PENDING : payment.status);
-  const isFailed = payment.status === PaymentStatus.FAILED;
-
-  return (
-    <div className="max-w-4xl mx-auto space-y-6">
-      <Link to="/" className="inline-flex items-center text-slate-500 hover:text-slate-800 transition-colors mb-2">
-        <ArrowLeft className="w-4 h-4 mr-2" />
-        Back to Dashboard
-      </Link>
-
-      {/* Header Card */}
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+currentDisplayStatus} size="md" showIcon={true} />
+               {/* Real-time connection indicator */}
+               {isConnected ? (
+                 <div className="flex items-center gap-1 text-xs text-emerald-600 bg-emerald-50 px-2 py-1 rounded-full">
+                   <Wifi className="w-3 h-3" />
+                   <span>Live</span>
+                 </div>
+               ) : (
+                 <div className="flex items-center gap-1 text-xs text-slate-400 bg-slate-100 px-2 py-1 rounded-full">
+                   <WifiOff className="w-3 h-3" />
+                   <span>Offline</span>
+                 </div>
+               )}
+               {/* Countdown indicator for processing state */}
+               {currentDisplaySwhite rounded-xl shadow-sm border border-slate-200 overflow-hidden">
         <div className="p-6 md:p-8 border-b border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
              <div className="flex items-center gap-3 mb-2">
