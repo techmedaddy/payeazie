@@ -320,33 +320,39 @@ async function authRoutes(fastify, options) {
       // Log OAuth initiation
       const logger = require('../../utils/logger');
       logger.info('✅ Initiating Google OAuth flow - redirecting to Google login');
+    }
+  }, async (req, reply) => {
+    // Handler: Use passport to initiate OAuth flow and redirect to Google
+    
+    // Create Express-compatible wrapper for passport
+    const res = {
+      setHeader: (name, value) => reply.header(name, value),
+      getHeader: (name) => reply.getHeader(name),
+      redirect: (url) => {
+        reply.redirect(url);
+        return res; // Return for chaining
+      },
+      end: () => reply.send(),
+      statusCode: 200,
+      headersSent: false,
+    };
 
-      // Create Express-compatible wrapper for passport
-      const res = {
-        setHeader: (name, value) => reply.header(name, value),
-        getHeader: (name) => reply.getHeader(name),
-        redirect: (url) => reply.redirect(url),
-        end: () => reply.send(),
-        statusCode: 200,
-        headersSent: false,
-      };
-
-      // Use passport to initiate OAuth flow
-      return new Promise((resolve, reject) => {
-        passport.authenticate('google', {
-          scope: ['profile', 'email'],
-          session: false
-        })(req, res, (err) => {
-          if (err) {
-            logger.error({ error: err.message }, 'Google OAuth initiation failed');
-            reject(err);
-          } else {
-            resolve();
-          }
-        });
+    // Use passport to initiate OAuth flow - this will redirect to Google
+    return new Promise((resolve, reject) => {
+      passport.authenticate('google', {
+        scope: ['profile', 'email'],
+        session: false
+      })(req, res, (err) => {
+        if (err) {
+          const logger = require('../../utils/logger');
+          logger.error({ error: err.message }, 'Google OAuth initiation failed');
+          reject(err);
+        } else {
+          // Don't resolve - let Passport handle the redirect
+          resolve();
+        }
       });
-    },
-    handler: authController.googleAuth
+    });
   });
 
   // GET /auth/google/callback - Google OAuth callback
@@ -371,13 +377,13 @@ async function authRoutes(fastify, options) {
     },
     preHandler: async (req, reply) => {
       if (!isGoogleOAuthConfigured()) {
-        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3002';
+        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
         return reply.redirect(`${frontendUrl}/#/login?error=oauth_not_configured`);
       }
 
       // Check for OAuth errors
       if (req.query.error) {
-        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3002';
+        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
         return reply.redirect(`${frontendUrl}/#/login?error=${req.query.error}`);
       }
 
@@ -385,10 +391,10 @@ async function authRoutes(fastify, options) {
       try {
         await authController.createPassportAuthenticator('google', {
           session: false,
-          failureRedirect: `${process.env.FRONTEND_URL || 'http://localhost:3002'}/#/login?error=oauth_failed`
+          failureRedirect: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/#/login?error=oauth_failed`
         })(req, reply);
       } catch (err) {
-        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3002';
+        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
         return reply.redirect(`${frontendUrl}/#/login?error=oauth_error`);
       }
     },

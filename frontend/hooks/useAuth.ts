@@ -86,14 +86,15 @@ export const useAuth = (): UseAuthResult => {
   // Logout
   const logout = () => {
     console.log('🔵 User logging out');
-    console.log('   Clearing authentication token');
+    console.log('   Clearing authentication token from localStorage');
     
     api.clearAuthToken();
     setUser(null);
     
-    console.log('✅ Logout complete');
-    console.log('   Token cleared from localStorage');
-    console.log('   User state reset');
+    console.log('✅ Logout successful');
+    console.log('   Token removed from localStorage');
+    console.log('   User state cleared');
+    console.log('   Protected routes will now redirect to /login');
   };
 
   return {

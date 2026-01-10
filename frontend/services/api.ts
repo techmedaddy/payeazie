@@ -39,13 +39,20 @@ async function fetchWithRetry<T>(url: string, options: RequestOptions = {}, retr
     if (!response.ok) {
       // Handle 401 Unauthorized - clear token and redirect to login
       if (response.status === 401) {
-        console.warn('❌ 401 Unauthorized - Redirecting to login');
+        const errorData = await response.json().catch(() => ({ message: 'Unauthorized' }));
+        
+        // Check if it's a token expiry
+        if (errorData.message && errorData.message.toLowerCase().includes('expired')) {
+          console.error('❌ Token expired, redirecting to login');
+        } else {
+          console.warn('❌ 401 Unauthorized - Redirecting to login');
+        }
+        
         localStorage.removeItem('authToken');
         // Only redirect if not already on login/register page
         if (!window.location.pathname.includes('/login') && !window.location.pathname.includes('/register')) {
           window.location.href = '/login';
         }
-        const errorData = await response.json().catch(() => ({ message: 'Unauthorized' }));
         throw { message: errorData.message || 'Unauthorized', statusCode: 401 } as ApiError;
       }
       

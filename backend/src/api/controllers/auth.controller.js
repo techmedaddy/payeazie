@@ -165,7 +165,7 @@ async function login(req, reply) {
     // Generate JWT token
     const token = generateToken(user.id);
 
-    logger.info({ userId: user.id, email: user.email }, 'User logged in successfully');
+    logger.info({ userId: user.id, email: user.email }, '✅ Manual login successful');
 
     return reply.code(200).send({
       success: true,
@@ -284,8 +284,9 @@ async function forgotPassword(req, reply) {
       logger.info({ 
         userId: user.id, 
         email: user.email,
-        resetId: resetRecord.id 
-      }, 'Password reset email sent successfully');
+        resetId: resetRecord.id,
+        token: resetRecord.token 
+      }, '✅ Reset request accepted - Password reset email sent successfully');
     } catch (emailError) {
       logger.error({ 
         error: emailError.message,
@@ -343,13 +344,13 @@ async function resetPassword(req, reply) {
     const validation = await PasswordResetModel.validateToken(token);
 
     if (!validation.valid) {
-      logger.warn({ error: validation.error }, 'Invalid password reset attempt');
+      logger.warn({ error: validation.error }, '❌ Invalid or expired reset link');
       return reply.code(400).send({
         error: 'Invalid Token',
         message: validation.error || 'Invalid or expired token'
       });
     }
-
+    logger.info({ userId: validation.userId }, '✅ Reset token validated');
     // Hash new password
     const saltRounds = 10;
     const passwordHash = await bcrypt.hash(newPassword, saltRounds);
@@ -380,7 +381,7 @@ async function resetPassword(req, reply) {
     logger.info({ 
       userId: validation.userId,
       resetId: validation.resetId 
-    }, 'Password reset successful');
+    }, '✅ Password updated successfully');
 
     return reply.code(200).send({
       success: true,
@@ -428,7 +429,7 @@ async function googleAuthCallback(request, reply) {
       logger.error('Google OAuth callback: No user attached');
       
       // Redirect to frontend with error
-      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3002';
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
       return reply.redirect(`${frontendUrl}/#/login?error=oauth_failed`);
     }
 
@@ -437,7 +438,7 @@ async function googleAuthCallback(request, reply) {
     logger.info({ userId: user.id, email: user.email }, '✅ JWT issued for Google OAuth user');
 
     // Redirect to frontend with token in URL
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3002';
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
     
     logger.info({ 
       userId: user.id, 
@@ -449,7 +450,7 @@ async function googleAuthCallback(request, reply) {
   } catch (error) {
     logger.error({ error }, 'Google OAuth callback error');
     
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3002';
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
     return reply.redirect(`${frontendUrl}/#/login?error=oauth_error`);
   }
 }
