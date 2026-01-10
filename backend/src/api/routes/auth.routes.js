@@ -352,25 +352,25 @@ async function authRoutes(fastify, options) {
     },
     preHandler: async (req, reply) => {
       if (!isGoogleOAuthConfigured()) {
-        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-        return reply.redirect(`${frontendUrl}/login?error=oauth_not_configured`);
+        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3002';
+        return reply.redirect(`${frontendUrl}/#/login?error=oauth_not_configured`);
       }
 
       // Check for OAuth errors
       if (req.query.error) {
-        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-        return reply.redirect(`${frontendUrl}/login?error=${req.query.error}`);
+        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3002';
+        return reply.redirect(`${frontendUrl}/#/login?error=${req.query.error}`);
       }
 
       // Use passport to handle callback
       try {
         await authController.createPassportAuthenticator('google', {
           session: false,
-          failureRedirect: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/login?error=oauth_failed`
+          failureRedirect: `${process.env.FRONTEND_URL || 'http://localhost:3002'}/#/login?error=oauth_failed`
         })(req, reply);
       } catch (err) {
-        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-        return reply.redirect(`${frontendUrl}/login?error=oauth_error`);
+        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3002';
+        return reply.redirect(`${frontendUrl}/#/login?error=oauth_error`);
       }
     },
     handler: authController.googleAuthCallback

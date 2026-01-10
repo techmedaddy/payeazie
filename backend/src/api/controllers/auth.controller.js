@@ -427,8 +427,8 @@ async function googleAuthCallback(req, reply) {
       logger.error('Google OAuth callback: No user attached');
       
       // Redirect to frontend with error
-      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-      return reply.redirect(`${frontendUrl}/login?error=oauth_failed`);
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3002';
+      return reply.redirect(`${frontendUrl}/#/login?error=oauth_failed`);
     }
 
     // Generate JWT token
@@ -437,13 +437,13 @@ async function googleAuthCallback(req, reply) {
     logger.info({ userId: user.id, email: user.email }, 'Google OAuth successful');
 
     // Redirect to frontend with token
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-    return reply.redirect(`${frontendUrl}/oauth/callback?token=${token}`);
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3002';
+    return reply.redirect(`${frontendUrl}/#/auth/google/callback?token=${token}`);
   } catch (error) {
     logger.error({ error }, 'Google OAuth callback error');
     
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-    return reply.redirect(`${frontendUrl}/login?error=oauth_error`);
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3002';
+    return reply.redirect(`${frontendUrl}/#/login?error=oauth_error`);
   }
 }
 

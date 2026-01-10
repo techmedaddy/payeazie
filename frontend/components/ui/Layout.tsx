@@ -1,10 +1,10 @@
 import React from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import Logo from '../Logo';
-import { LayoutDashboard, PlusCircle, User, Menu, X, Loader2, AlertCircle, CheckCircle } from 'lucide-react';
+import { LayoutDashboard, PlusCircle, User, Menu, X, Loader2, AlertCircle, CheckCircle, LogOut, ChevronDown } from 'lucide-react';
 import { cn } from '../../utils/cn';
 import { useApiHealth } from '../../hooks/useApiHealth';
-import { setupDemoAuth } from '../../hooks/useDemoAuth';
+import { useAuthContext } from '../../context/AuthContext';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -31,13 +31,16 @@ const NavItem: React.FC<{ to: string; icon: React.ReactNode; label: string; acti
 
 const Layout: React.FC<LayoutProps> = ({ children }) => {
   const location = useLocation();
+  const navigate = useNavigate();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = React.useState(false);
+  const [showUserMenu, setShowUserMenu] = React.useState(false);
   const { isHealthy, isLoading, error, data } = useApiHealth();
+  const { user, logout } = useAuthContext();
 
-  // Setup demo auth automatically on mount
-  React.useEffect(() => {
-    setupDemoAuth();
-  }, []);
+  const handleLogout = () => {
+    logout();
+    navigate('/login');
+  };
 
   // Show loading spinner while checking health
   if (isLoading) {
@@ -103,15 +106,44 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                 {isMobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
               </button>
 
-              {/* Profile Placeholder */}
-              <div className="hidden md:flex items-center gap-3 pl-6 border-l border-slate-200">
-                <div className="flex flex-col text-right">
-                  <span className="text-sm font-medium text-slate-900">Admin User</span>
-                  <span className="text-xs text-slate-500">Engineering</span>
-                </div>
-                <div className="w-9 h-9 rounded-full bg-brand-100 flex items-center justify-center text-brand-700 border border-brand-200">
-                  <User className="w-5 h-5" />
-                </div>
+              {/* Profile & Logout */}
+              <div className="hidden md:block relative pl-6 border-l border-slate-200">
+                <button
+                  onClick={() => setShowUserMenu(!showUserMenu)}
+                  className="flex items-center gap-3 hover:bg-slate-50 rounded-lg p-2 transition-colors"
+                >
+                  <div className="flex flex-col text-right">
+                    <span className="text-sm font-medium text-slate-900">{user?.name || 'User'}</span>
+                    <span className="text-xs text-slate-500 capitalize">{user?.role || 'member'}</span>
+                  </div>
+                  <div className="w-9 h-9 rounded-full bg-purple-100 flex items-center justify-center text-purple-700 border border-purple-200">
+                    <User className="w-5 h-5" />
+                  </div>
+                  <ChevronDown className="w-4 h-4 text-slate-400" />
+                </button>
+
+                {/* User Dropdown Menu */}
+                {showUserMenu && (
+                  <>
+                    <div 
+                      className="fixed inset-0 z-30" 
+                      onClick={() => setShowUserMenu(false)}
+                    />
+                    <div className="absolute right-0 top-full mt-2 w-56 bg-white rounded-lg shadow-lg border border-slate-200 py-2 z-40">
+                      <div className="px-4 py-3 border-b border-slate-100">
+                        <p className="text-sm font-medium text-slate-900">{user?.name}</p>
+                        <p className="text-xs text-slate-500 mt-0.5">{user?.email}</p>
+                      </div>
+                      <button
+                        onClick={handleLogout}
+                        className="w-full flex items-center gap-3 px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors"
+                      >
+                        <LogOut className="w-4 h-4" />
+                        <span>Sign Out</span>
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -132,6 +164,26 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                   label="Create Payment" 
                   active={location.pathname === '/create'} 
                 />
+                
+                {/* Mobile User Info */}
+                <div className="pt-3 mt-3 border-t border-slate-200">
+                  <div className="flex items-center gap-3 px-3 py-2 text-sm text-slate-700">
+                    <div className="w-8 h-8 rounded-full bg-purple-100 flex items-center justify-center text-purple-700">
+                      <User className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <p className="font-medium">{user?.name || 'User'}</p>
+                      <p className="text-xs text-slate-500 capitalize">{user?.role || 'member'}</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleLogout}
+                    className="w-full flex items-center gap-3 px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-md transition-colors"
+                  >
+                    <LogOut className="w-4 h-4" />
+                    <span>Sign Out</span>
+                  </button>
+                </div>
           </div>
         )}
       </header>

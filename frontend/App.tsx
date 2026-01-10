@@ -4,8 +4,13 @@ import Layout from './components/ui/Layout';
 import Dashboard from './pages/Dashboard';
 import CreatePayment from './pages/CreatePayment';
 import PaymentDetails from './pages/PaymentDetails';
+import Login from './pages/Login';
+import Register from './pages/Register';
+import GoogleCallback from './pages/GoogleCallback';
 import NotFound from './pages/NotFound';
 import { ToastProvider } from './context/ToastContext';
+import { AuthProvider } from './context/AuthContext';
+import ProtectedRoute from './components/ProtectedRoute';
 
 interface ErrorBoundaryProps {
   children: React.ReactNode;
@@ -55,18 +60,38 @@ const App: React.FC = () => {
   return (
     <ErrorBoundary>
       <ToastProvider>
-        <Router>
-          <Layout>
+        <AuthProvider>
+          <Router>
             <Routes>
+              {/* Public Routes */}
+              <Route path="/login" element={<Login />} />
+              <Route path="/register" element={<Register />} />
+              <Route path="/auth/google/callback" element={<GoogleCallback />} />
+              
+              {/* Protected Routes */}
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
-              <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/create" element={<CreatePayment />} />
-              <Route path="/payment/:id" element={<PaymentDetails />} />
+              <Route path="/dashboard" element={
+                <ProtectedRoute>
+                  <Layout><Dashboard /></Layout>
+                </ProtectedRoute>
+              } />
+              <Route path="/create" element={
+                <ProtectedRoute>
+                  <Layout><CreatePayment /></Layout>
+                </ProtectedRoute>
+              } />
+              <Route path="/payment/:id" element={
+                <ProtectedRoute>
+                  <Layout><PaymentDetails /></Layout>
+                </ProtectedRoute>
+              } />
+              
+              {/* Error Routes */}
               <Route path="/404" element={<NotFound />} />
               <Route path="*" element={<Navigate to="/404" replace />} />
             </Routes>
-          </Layout>
-        </Router>
+          </Router>
+        </AuthProvider>
       </ToastProvider>
     </ErrorBoundary>
   );
