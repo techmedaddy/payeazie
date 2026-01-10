@@ -321,12 +321,22 @@ async function authRoutes(fastify, options) {
       const logger = require('../../utils/logger');
       logger.info('✅ Initiating Google OAuth flow - redirecting to Google login');
 
+      // Create Express-compatible wrapper for passport
+      const res = {
+        setHeader: (name, value) => reply.header(name, value),
+        getHeader: (name) => reply.getHeader(name),
+        redirect: (url) => reply.redirect(url),
+        end: () => reply.send(),
+        statusCode: 200,
+        headersSent: false,
+      };
+
       // Use passport to initiate OAuth flow
       return new Promise((resolve, reject) => {
         passport.authenticate('google', {
           scope: ['profile', 'email'],
           session: false
-        })(req, reply, (err) => {
+        })(req, res, (err) => {
           if (err) {
             logger.error({ error: err.message }, 'Google OAuth initiation failed');
             reject(err);

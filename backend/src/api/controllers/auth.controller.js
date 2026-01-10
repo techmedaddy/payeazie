@@ -417,12 +417,12 @@ async function googleAuth(req, reply) {
 
 /**
  * GET /auth/google/callback
- * Handle Google OAuth callback
+ * Handle Google OAuth callback (Fastify-compatible)
  */
-async function googleAuthCallback(req, reply) {
+async function googleAuthCallback(request, reply) {
   try {
     // User is attached by passport middleware
-    const user = req.user;
+    const user = request.user;
 
     if (!user) {
       logger.error('Google OAuth callback: No user attached');
@@ -436,12 +436,14 @@ async function googleAuthCallback(req, reply) {
     const token = generateToken(user.id);
     logger.info({ userId: user.id, email: user.email }, '✅ JWT issued for Google OAuth user');
 
-    // Log successful OAuth completion
-    logger.info({ userId: user.id, email: user.email }, 'Google OAuth successful - redirecting to frontend');
-
-    // Redirect to frontend with token
+    // Redirect to frontend with token in URL
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3002';
-    logger.info({ frontendUrl, userId: user.id }, '✅ Redirect complete: OAuth callback to frontend');
+    
+    logger.info({ 
+      userId: user.id, 
+      email: user.email, 
+      frontendUrl 
+    }, '✅ Google OAuth callback completed');
     
     return reply.redirect(`${frontendUrl}/#/auth/google/callback?token=${token}`);
   } catch (error) {
@@ -454,10 +456,21 @@ async function googleAuthCallback(req, reply) {
 
 /**
  * Passport authenticate middleware wrapper for Fastify
+ * Creates an Express-compatible response wrapper for Passport
  */
 function createPassportAuthenticator(strategy, options = {}) {
   return (req, reply) => {
     return new Promise((resolve, reject) => {
+      // Create Express-compatible response object wrapper
+      const res = {
+        setHeader: (name, value) => reply.header(name, value),
+        getHeader: (name) => reply.getHeader(name),
+        redirect: (url) => reply.redirect(url),
+        end: () => reply.send(),
+        statusCode: 200,
+        headersSent: false,
+      };
+
       passport.authenticate(strategy, options, (err, user, info) => {
         if (err) {
           logger.error({ error: err.message, strategy }, 'Passport authentication error');
@@ -472,7 +485,7 @@ function createPassportAuthenticator(strategy, options = {}) {
         // Attach user to request
         req.user = user;
         resolve(user);
-      })(req, reply);
+      })(req, res);
     });
   };
 }
