@@ -31,21 +31,25 @@ const requestLogger = async (request, reply) => {
     // Log the incoming request
     logger.info(logData, 'request: incoming');
 
-    // Hook into response to log completion
-    reply.addHook('onResponse', async (request, reply) => {
+    // Hook into response to log completion using reply.raw (Node.js response object)
+    const logResponse = () => {
         const duration = Date.now() - startTime;
         
         logger.info({
             requestId: request.id,
             method: request.method,
             path: request.url,
-            statusCode: reply.statusCode,
+            statusCode: reply.statusCode || reply.raw.statusCode,
             duration,
             userId: request.user?.id || null
         }, 'request: completed');
-    });
+    };
+
+    // Use reply.raw.once to hook into the response finish event
+    reply.raw.once('finish', logResponse);
 
     // Continue to the next handler
+    return;
 };
 
 /**
@@ -85,15 +89,19 @@ const detailedRequestLogger = async (request, reply) => {
 
     logger.debug(logData, 'request: detailed');
 
-    reply.addHook('onResponse', async (request, reply) => {
+    const logResponse = () => {
         const duration = Date.now() - startTime;
         
         logger.debug({
             requestId: request.id,
-            statusCode: reply.statusCode,
+            statusCode: reply.statusCode || reply.raw.statusCode,
             duration
         }, 'request: response');
-    });
+    };
+
+    reply.raw.once('finish', logResponse);
+    
+    return;
 };
 
 module.exports = {

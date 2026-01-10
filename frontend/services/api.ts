@@ -1,15 +1,28 @@
 import { ApiError } from '../types';
 
-const BASE_URL = 'http://localhost:3467';
+const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3467';
 const MAX_RETRIES = 3;
 
 interface RequestOptions extends RequestInit {
   idempotencyKey?: string;
 }
 
+/**
+ * Get authentication token from localStorage
+ */
+function getAuthToken(): string | null {
+  return localStorage.getItem('authToken');
+}
+
 async function fetchWithRetry<T>(url: string, options: RequestOptions = {}, retries = MAX_RETRIES): Promise<T> {
   const headers = new Headers(options.headers);
   headers.set('Content-Type', 'application/json');
+  
+  // Add authorization header if token exists
+  const token = getAuthToken();
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
   
   if (options.idempotencyKey) {
     headers.set('Idempotency-Key', options.idempotencyKey);
@@ -51,4 +64,7 @@ export const api = {
       body: JSON.stringify(body),
       idempotencyKey 
     }),
+  setAuthToken: (token: string) => localStorage.setItem('authToken', token),
+  clearAuthToken: () => localStorage.removeItem('authToken'),
+  getAuthToken,
 };

@@ -1,5 +1,5 @@
 const auditController = require('../controllers/audit.controller');
-const { authenticate } = require('../middleware/auth.middleware');
+const { authMiddleware } = require('../middleware/auth.middleware');
 
 /**
  * Register audit log routes
@@ -12,14 +12,14 @@ async function auditRoutes(fastify, options) {
     // Admin users can see all audit logs or filter by user_id
     fastify.get(
         '/audit-logs',
-        { preHandler: [authenticate] },
+        { preHandler: [authMiddleware] },
         auditController.getAuditLogs
     );
 
     // Get audit logs for a specific payment
     fastify.get(
         '/audit-logs/:paymentId',
-        { preHandler: [authenticate] },
+        { preHandler: [authMiddleware] },
         auditController.getPaymentAuditLogs
     );
 }

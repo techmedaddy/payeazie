@@ -319,7 +319,8 @@ const createPayment = async (req, reply) => {
         orderId,
         amount,
         currency,
-        hasIdempotencyKey: !!req.headers['idempotency-key']
+        hasIdempotencyKey: !!req.headers['idempotency-key'],
+        userId: req.user?.id
     }, 'createPayment: incoming request');
     
     // Validate fields (idempotency key is now always present)
@@ -334,7 +335,7 @@ const createPayment = async (req, reply) => {
     }
     
     try {
-        const record = await idempotencyService.resolve(orderId, idempotencyKey, amount, currency);
+        const record = await idempotencyService.resolve(orderId, idempotencyKey, amount, currency, req.user?.id);
         
         metrics.recordPaymentCreated();
         metrics.recordPaymentStatus(record.status);
@@ -342,7 +343,8 @@ const createPayment = async (req, reply) => {
         logger.info({ 
             paymentId: record.id, 
             status: record.status,
-            idempotencyKey 
+            idempotencyKey,
+            userId: req.user?.id
         }, 'createPayment: success');
         
         const response = transformPaymentResponse(record);
@@ -351,7 +353,8 @@ const createPayment = async (req, reply) => {
         logger.error({
             error: err.message,
             stack: err.stack,
-            orderId
+            orderId,
+            userId: req.user?.id
         }, 'createPayment: error caught');
         
         if (err.name === 'IdempotencyConflictError') {

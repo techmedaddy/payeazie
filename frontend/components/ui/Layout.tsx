@@ -1,8 +1,10 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import Logo from '../Logo';
-import { LayoutDashboard, PlusCircle, User, Menu, X } from 'lucide-react';
+import { LayoutDashboard, PlusCircle, User, Menu, X, Loader2, AlertCircle, CheckCircle } from 'lucide-react';
 import { cn } from '../../utils/cn';
+import { useApiHealth } from '../../hooks/useApiHealth';
+import { setupDemoAuth } from '../../hooks/useDemoAuth';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -30,6 +32,25 @@ const NavItem: React.FC<{ to: string; icon: React.ReactNode; label: string; acti
 const Layout: React.FC<LayoutProps> = ({ children }) => {
   const location = useLocation();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = React.useState(false);
+  const { isHealthy, isLoading, error, data } = useApiHealth();
+
+  // Setup demo auth automatically on mount
+  React.useEffect(() => {
+    setupDemoAuth();
+  }, []);
+
+  // Show loading spinner while checking health
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="w-12 h-12 text-brand-600 animate-spin mx-auto mb-4" />
+          <p className="text-slate-600 text-lg">Connecting to backend...</p>
+          <p className="text-slate-400 text-sm mt-2">Checking API health</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
@@ -43,10 +64,10 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
               {/* Desktop Nav */}
               <nav className="hidden md:flex gap-1">
                 <NavItem 
-                  to="/" 
+                  to="/dashboard" 
                   icon={<LayoutDashboard />} 
                   label="Dashboard" 
-                  active={location.pathname === '/'} 
+                  active={location.pathname === '/dashboard' || location.pathname === '/'} 
                 />
                 <NavItem 
                   to="/create" 
@@ -58,6 +79,22 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
             </div>
 
             <div className="flex items-center gap-4">
+              {/* API Health Status Indicator */}
+              <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium border"
+                   title={error || `Environment: ${data?.environment || 'unknown'}`}>
+                {isHealthy ? (
+                  <>
+                    <CheckCircle className="w-3.5 h-3.5 text-green-600" />
+                    <span className="text-green-700">API Connected</span>
+                  </>
+                ) : (
+                  <>
+                    <AlertCircle className="w-3.5 h-3.5 text-red-600" />
+                    <span className="text-red-700">API Offline</span>
+                  </>
+                )}
+              </div>
+
                {/* Mobile Menu Button */}
                <button 
                 onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
@@ -84,10 +121,10 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
         {isMobileMenuOpen && (
           <div className="md:hidden border-t border-slate-200 bg-white px-4 py-2 space-y-1">
              <NavItem 
-                  to="/" 
+                  to="/dashboard" 
                   icon={<LayoutDashboard />} 
                   label="Dashboard" 
-                  active={location.pathname === '/'} 
+                  active={location.pathname === '/dashboard' || location.pathname === '/'} 
                 />
                 <NavItem 
                   to="/create" 

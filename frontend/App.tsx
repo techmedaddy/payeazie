@@ -58,7 +58,8 @@ const App: React.FC = () => {
         <Router>
           <Layout>
             <Routes>
-              <Route path="/" element={<Dashboard />} />
+              <Route path="/" element={<Navigate to="/dashboard" replace />} />
+              <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/create" element={<CreatePayment />} />
               <Route path="/payment/:id" element={<PaymentDetails />} />
               <Route path="/404" element={<NotFound />} />

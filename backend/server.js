@@ -17,7 +17,6 @@ const db = require('./src/db');
 const paymentRoutes = require('./src/api/routes/payment.routes');
 const authRoutes = require('./src/api/routes/auth.routes');
 const auditRoutes = require('./src/api/routes/audit.routes');
-const { requestLogger } = require('./src/api/middleware/request-logger.middleware');
 const { queueClient } = require('./src/utils/queue');
 
 /**
@@ -85,13 +84,6 @@ async function runMigrations() {
 }
 
 /**
- * Start background workers
- * These listen for jobs from the BullMQ queues
- */
-require('./src/workers/charge.worker');
-require('./src/workers/reconcile.worker');
-
-/**
  * Environment validation
  */
 function ensureEnv() {
@@ -130,7 +122,18 @@ function buildServer() {
   initializeGoogleStrategy();
 
   // Request logging middleware (applied globally)
+  const { requestLogger } = require('./src/api/middleware/request-logger.middleware');
   app.addHook('preHandler', requestLogger);
+
+  // Root route
+  app.get('/', async (request, reply) => {
+    return { 
+      message: 'Backend is running',
+      service: 'Payeazie Payment API',
+      version: '1.0.0',
+      status: 'ok'
+    };
+  });
 
   // Basic health check (fast, non-blocking)
   app.get('/health', async (request, reply) => {
