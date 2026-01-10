@@ -15,18 +15,32 @@ const GoogleCallback: React.FC = () => {
       const token = searchParams.get('token');
       const errorMsg = searchParams.get('error');
 
+      console.log('✅ Callback received from Google OAuth');
+      console.log('   Token present:', !!token);
+      console.log('   Error present:', !!errorMsg);
+
       if (errorMsg) {
+        console.error('❌ OAuth error:', errorMsg);
         setError(errorMsg);
         setTimeout(() => navigate('/login'), 3000);
         return;
       }
 
       if (token) {
+        console.log('✅ JWT received from backend');
+        console.log('   Token length:', token.length);
+        
         // Store token and refresh user
         api.setAuthToken(token);
+        console.log('✅ Token stored in localStorage');
+        
         await refreshUser();
+        console.log('✅ User profile refreshed');
+        console.log('✅ Navigating to dashboard');
+        
         navigate('/dashboard', { replace: true });
       } else {
+        console.error('❌ No token received from Google OAuth');
         setError('No token received from Google OAuth');
         setTimeout(() => navigate('/login'), 3000);
       }

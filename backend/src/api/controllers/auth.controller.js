@@ -403,7 +403,8 @@ async function googleAuth(req, reply) {
   if (!isGoogleOAuthConfigured()) {
     return reply.code(503).send({
       error: 'Service Unavailable',
-      message: 'Google OAuth is not configured on this server'
+      message: 'Google OAuth is not configured on this server',
+      details: 'Please set GOOGLE_CLIENT_SECRET in your .env file. See GOOGLE_OAUTH_SETUP.md for instructions.'
     });
   }
 
@@ -433,11 +434,15 @@ async function googleAuthCallback(req, reply) {
 
     // Generate JWT token
     const token = generateToken(user.id);
+    logger.info({ userId: user.id, email: user.email }, '✅ JWT issued for Google OAuth user');
 
-    logger.info({ userId: user.id, email: user.email }, 'Google OAuth successful');
+    // Log successful OAuth completion
+    logger.info({ userId: user.id, email: user.email }, 'Google OAuth successful - redirecting to frontend');
 
     // Redirect to frontend with token
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3002';
+    logger.info({ frontendUrl, userId: user.id }, '✅ Redirect complete: OAuth callback to frontend');
+    
     return reply.redirect(`${frontendUrl}/#/auth/google/callback?token=${token}`);
   } catch (error) {
     logger.error({ error }, 'Google OAuth callback error');

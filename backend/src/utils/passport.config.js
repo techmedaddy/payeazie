@@ -36,7 +36,10 @@ function initializeGoogleStrategy() {
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
   const callbackURL = process.env.GOOGLE_CALLBACK_URL || 'http://localhost:3467/api/auth/google/callback';
 
-  if (!clientID || !clientSecret) {
+  // Check for both existence and placeholder values
+  if (!clientID || !clientSecret || 
+      clientSecret === 'YOUR_GOOGLE_CLIENT_SECRET_HERE' || 
+      clientSecret === 'YOUR_SECRET_HERE') {
     logger.warn('Google OAuth credentials not configured. Google login will be disabled.');
     return false;
   }
@@ -112,7 +115,16 @@ function initializeGoogleStrategy() {
  * Check if Google OAuth is configured
  */
 function isGoogleOAuthConfigured() {
-  return !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
+  const clientID = process.env.GOOGLE_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  
+  // Check if both values exist and are not placeholders
+  return !!(
+    clientID && 
+    clientSecret && 
+    clientSecret !== 'YOUR_GOOGLE_CLIENT_SECRET_HERE' &&
+    clientSecret !== 'YOUR_SECRET_HERE'
+  );
 }
 
 module.exports = {

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthContext } from '../context/AuthContext';
 import { Loader2, LogIn, Mail, Lock, AlertCircle } from 'lucide-react';
@@ -18,6 +18,22 @@ const Login: React.FC = () => {
 
   const from = (location.state as any)?.from?.pathname || '/dashboard';
 
+  // Check for OAuth error in URL
+  useEffect(() => {
+    const searchParams = new URLSearchParams(location.search);
+    const oauthError = searchParams.get('error');
+    
+    if (oauthError) {
+      const errorMessages: Record<string, string> = {
+        oauth_not_configured: 'Google OAuth is not configured. Please contact support or use email/password login.',
+        oauth_failed: 'Google login failed. Please try again or use email/password login.',
+        oauth_error: 'An error occurred during Google login. Please try again.',
+      };
+      
+      setError(errorMessages[oauthError] || 'An unexpected error occurred during login.');
+    }
+  }, [location.search]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -35,7 +51,13 @@ const Login: React.FC = () => {
 
   const handleGoogleLogin = () => {
     const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3467';
-    window.location.href = `${apiUrl}/api/auth/google`;
+    const oauthUrl = `${apiUrl}/api/auth/google`;
+    
+    console.log('🔵 Initiating Google OAuth flow');
+    console.log('   Redirecting to:', oauthUrl);
+    console.log('   Expected callback: /#/auth/google/callback?token=...');
+    
+    window.location.href = oauthUrl;
   };
 
   return (

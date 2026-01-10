@@ -312,9 +312,14 @@ async function authRoutes(fastify, options) {
       if (!isGoogleOAuthConfigured()) {
         return reply.code(503).send({
           error: 'Service Unavailable',
-          message: 'Google OAuth is not configured on this server'
+          message: 'Google OAuth is not configured on this server',
+          details: 'Please set GOOGLE_CLIENT_SECRET in your .env file. See GOOGLE_OAUTH_SETUP.md for instructions.'
         });
       }
+
+      // Log OAuth initiation
+      const logger = require('../../utils/logger');
+      logger.info('✅ Initiating Google OAuth flow - redirecting to Google login');
 
       // Use passport to initiate OAuth flow
       return new Promise((resolve, reject) => {
@@ -322,8 +327,12 @@ async function authRoutes(fastify, options) {
           scope: ['profile', 'email'],
           session: false
         })(req, reply, (err) => {
-          if (err) reject(err);
-          else resolve();
+          if (err) {
+            logger.error({ error: err.message }, 'Google OAuth initiation failed');
+            reject(err);
+          } else {
+            resolve();
+          }
         });
       });
     },

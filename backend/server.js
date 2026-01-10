@@ -112,14 +112,49 @@ function buildServer() {
     origin: true,
   });
 
+  // Session handling (required for Passport, but we use JWT so sessions are minimal)
+  const sessionSecret = process.env.SESSION_SECRET || process.env.JWT_SECRET || 'default-32-byte-secret-change!!';
+  const sessionKey = sessionSecret.length >= 32 
+    ? Buffer.from(sessionSecret.substring(0, 32), 'utf-8')
+    : Buffer.concat([Buffer.from(sessionSecret, 'utf-8'), Buffer.alloc(32)], 32);
+  
+  app.register(require('@fastify/secure-session'), {
+    key: sessionKey,
+    cookie: {
+      path: '/',
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      maxAge: 24 * 60 * 60 * 1000 // 24 hours
+    }
+  });
+
+  // Register Fastify Passport plugin
+  const fastifyPassport = require('@fastify/passport');
+  const { passport, initializeGoogleStrategy } = require('./src/utils/passport.config');
+  
+  // Register passport with Fastify
+  app.register(fastifyPassport.initialize());
+  app.register(fastifyPassport.secureSession());
+  
+  // Make passport instance available as decorator
+  app.decorate('passport', passport);
+  
+  // Initialize Passport strategies
+  const strategyInitialized = initializeGoogleStrategy();
+  
+  if (strategyInitialized) {
+    console.log('✅ Passport middleware initialized with Google OAuth strategy');
+  } else {
+    console.log('⚠️  Passport middleware initialized (Google OAuth disabled)');
+  }
+
+  // Store strategy status for later use
+  app.decorate('googleOAuthEnabled', strategyInitialized);
+
   // Rate limiting
   const rateLimitPlugin = require('@fastify/rate-limit');
   const { rateLimitOptions } = require('./src/api/middleware/rate-limit.middleware');
   app.register(rateLimitPlugin, rateLimitOptions);
-
-  // Initialize Passport for OAuth
-  const { initializeGoogleStrategy } = require('./src/utils/passport.config');
-  initializeGoogleStrategy();
 
   // Request logging middleware (applied globally)
   const { requestLogger } = require('./src/api/middleware/request-logger.middleware');
@@ -264,6 +299,14 @@ async function start() {
     console.log(`│ Health:       http://localhost:${port}/health`);
     console.log(`│ API:          http://localhost:${port}/api`);
     console.log('└─────────────────────────────────────────────\n');
+    
+    // Log OAuth routes if enabled
+    if (app.googleOAuthEnabled) {
+      console.log('✅ Auth routes registered');
+      console.log('   ✅ Google login route wired: GET /api/auth/google');
+      console.log('   ✅ Google callback route wired: GET /api/auth/google/callback');
+      console.log('');
+    }
     
     app.log.debug('Environment variables loaded:', {
       DATABASE_URL: process.env.DATABASE_URL ? '✓ set' : '✗ missing',

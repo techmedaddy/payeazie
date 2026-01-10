@@ -32,10 +32,19 @@ export const useAuth = (): UseAuthResult => {
     }
 
     try {
+      console.log('🔵 Making authenticated API call to /api/auth/me');
+      console.log('   Token present:', !!token);
+      console.log('   Token length:', token.length);
+      
       const response = await api.get<{ user: User }>('/api/auth/me');
+      
+      console.log('✅ Authenticated API call succeeded');
+      console.log('   User:', response.user.email);
+      console.log('   Role:', response.user.role);
+      
       setUser(response.user);
     } catch (error) {
-      console.error('Failed to fetch user:', error);
+      console.error('❌ Failed to fetch user:', error);
       api.clearAuthToken();
       setUser(null);
     } finally {
