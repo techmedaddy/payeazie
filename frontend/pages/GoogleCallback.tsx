@@ -15,34 +15,45 @@ const GoogleCallback: React.FC = () => {
       const token = searchParams.get('token');
       const errorMsg = searchParams.get('error');
 
-      console.log('✅ Callback received from Google OAuth');
+      console.log('🔵 Google OAuth callback received');
       console.log('   Token present:', !!token);
       console.log('   Error present:', !!errorMsg);
 
       if (errorMsg) {
         console.error('❌ OAuth error:', errorMsg);
         setError(errorMsg);
-        setTimeout(() => navigate('/login'), 3000);
+        setTimeout(() => {
+          console.log('⏩ Redirecting to login after error');
+          navigate('/login');
+        }, 3000);
         return;
       }
 
       if (token) {
-        console.log('✅ JWT received from backend');
+        console.log('✅ JWT token received from backend');
         console.log('   Token length:', token.length);
         
-        // Store token and refresh user
+        // Store token in localStorage
         api.setAuthToken(token);
-        console.log('✅ Token stored in localStorage');
+        console.log('✅ Token stored in localStorage as "authToken"');
+        console.log('   localStorage key: authToken');
+        console.log('   Token value:', `${token.substring(0, 20)}...`);
         
+        // Refresh user profile
         await refreshUser();
-        console.log('✅ User profile refreshed');
-        console.log('✅ Navigating to dashboard');
+        console.log('✅ User profile refreshed from /api/auth/me');
+        console.log('✅ Authentication complete');
+        console.log('⏩ Navigating to dashboard');
         
         navigate('/dashboard', { replace: true });
       } else {
         console.error('❌ No token received from Google OAuth');
+        console.error('   This usually means the backend OAuth flow failed');
         setError('No token received from Google OAuth');
-        setTimeout(() => navigate('/login'), 3000);
+        setTimeout(() => {
+          console.log('⏩ Redirecting to login');
+          navigate('/login');
+        }, 3000);
       }
     };
 

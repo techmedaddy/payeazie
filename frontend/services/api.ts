@@ -37,6 +37,18 @@ async function fetchWithRetry<T>(url: string, options: RequestOptions = {}, retr
     const response = await fetch(`${BASE_URL}${url}`, config);
 
     if (!response.ok) {
+      // Handle 401 Unauthorized - clear token and redirect to login
+      if (response.status === 401) {
+        console.warn('❌ 401 Unauthorized - Redirecting to login');
+        localStorage.removeItem('authToken');
+        // Only redirect if not already on login/register page
+        if (!window.location.pathname.includes('/login') && !window.location.pathname.includes('/register')) {
+          window.location.href = '/login';
+        }
+        const errorData = await response.json().catch(() => ({ message: 'Unauthorized' }));
+        throw { message: errorData.message || 'Unauthorized', statusCode: 401 } as ApiError;
+      }
+      
       // Don't retry client errors (4xx) except 429 or 408
       if (response.status >= 400 && response.status < 500 && response.status !== 429 && response.status !== 408) {
          const errorData = await response.json().catch(() => ({ message: 'Unknown Error' }));

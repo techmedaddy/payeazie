@@ -13,6 +13,7 @@ async function authMiddleware(req, reply) {
     const authHeader = req.headers.authorization;
     
     if (!authHeader) {
+      logger.warn({ path: req.url, method: req.method }, '❌ Unauthorized access attempt - No authorization header');
       return reply.code(401).send({
         error: 'Unauthorized',
         message: 'Authorization header missing'
@@ -21,6 +22,7 @@ async function authMiddleware(req, reply) {
 
     // Check Bearer format
     if (!authHeader.startsWith('Bearer ')) {
+      logger.warn({ path: req.url, method: req.method }, '❌ Unauthorized access attempt - Invalid format');
       return reply.code(401).send({
         error: 'Unauthorized',
         message: 'Invalid authorization format. Use: Bearer <token>'
@@ -31,6 +33,7 @@ async function authMiddleware(req, reply) {
     const token = authHeader.substring(7);
 
     if (!token) {
+      logger.warn({ path: req.url, method: req.method }, '❌ Unauthorized access attempt - Token missing');
       return reply.code(401).send({
         error: 'Unauthorized',
         message: 'Token missing'
@@ -52,12 +55,14 @@ async function authMiddleware(req, reply) {
       decoded = jwt.verify(token, jwtSecret);
     } catch (err) {
       if (err.name === 'TokenExpiredError') {
+        logger.warn({ path: req.url, method: req.method }, '❌ Unauthorized access attempt - Token expired');
         return reply.code(401).send({
           error: 'Unauthorized',
           message: 'Token expired'
         });
       }
       if (err.name === 'JsonWebTokenError') {
+        logger.warn({ path: req.url, method: req.method }, '❌ Unauthorized access attempt - Invalid token');
         return reply.code(401).send({
           error: 'Unauthorized',
           message: 'Invalid token'
@@ -69,6 +74,7 @@ async function authMiddleware(req, reply) {
     // Verify user still exists
     const user = await UserModel.findById(decoded.userId);
     if (!user) {
+      logger.warn({ path: req.url, method: req.method, userId: decoded.userId }, '❌ Unauthorized access attempt - User not found');
       return reply.code(401).send({
         error: 'Unauthorized',
         message: 'User not found'
@@ -83,9 +89,15 @@ async function authMiddleware(req, reply) {
       role: user.role || 'user'
     };
 
-    logger.debug({ userId: user.id, email: user.email, role: user.role }, 'User authenticated');
+    logger.info({ 
+      userId: user.id, 
+      email: user.email, 
+      role: user.role,
+      path: req.url,
+      method: req.method 
+    }, '✅ JWT verified - User authenticated');
   } catch (error) {
-    logger.error({ error }, 'Authentication error');
+    logger.error({ error, path: req.url, method: req.method }, '❌ Unauthorized access attempt - Authentication error');
     return reply.code(500).send({
       error: 'Internal Server Error',
       message: 'Authentication failed'

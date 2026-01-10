@@ -59,13 +59,22 @@ export const useAuth = (): UseAuthResult => {
 
   // Login
   const login = async (email: string, password: string) => {
+    console.log('🔵 Attempting login');
+    console.log('   Email:', email);
+    
     const response = await api.post<{ token: string; user: User }>(
       '/api/auth/login',
       { email, password }
     );
     
+    console.log('✅ Login successful');
+    console.log('   User:', response.user.email);
+    console.log('   Token received, length:', response.token.length);
+    
     api.setAuthToken(response.token);
     setUser(response.user);
+    
+    console.log('✅ Token stored in localStorage');
   };
 
   // Register
@@ -76,8 +85,15 @@ export const useAuth = (): UseAuthResult => {
 
   // Logout
   const logout = () => {
+    console.log('🔵 User logging out');
+    console.log('   Clearing authentication token');
+    
     api.clearAuthToken();
     setUser(null);
+    
+    console.log('✅ Logout complete');
+    console.log('   Token cleared from localStorage');
+    console.log('   User state reset');
   };
 
   return {

@@ -38,8 +38,13 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const { user, logout } = useAuthContext();
 
   const handleLogout = () => {
+    console.log('🔵 Logout button clicked');
+    console.log('   Clearing token and redirecting to login');
+    
     logout();
     navigate('/login');
+    
+    console.log('✅ Redirected to login page');
   };
 
   // Show loading spinner while checking health
