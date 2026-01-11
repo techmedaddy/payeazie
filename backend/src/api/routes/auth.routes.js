@@ -289,116 +289,64 @@ async function authRoutes(fastify, options) {
   });
 
   // GET /auth/google - Initiate Google OAuth
-  fastify.get('/google', {
-    schema: {
-      description: 'Initiate Google OAuth 2.0 authentication',
-      tags: ['auth'],
-      response: {
-        302: {
-          description: 'Redirect to Google OAuth',
-          type: 'object'
-        },
-        503: {
-          description: 'Google OAuth not configured',
-          type: 'object',
-          properties: {
-            error: { type: 'string' },
-            message: { type: 'string' }
-          }
-        }
-      }
-    },
-    preHandler: async (req, reply) => {
-      if (!isGoogleOAuthConfigured()) {
-        return reply.code(503).send({
-          error: 'Service Unavailable',
-          message: 'Google OAuth is not configured on this server',
-          details: 'Please set GOOGLE_CLIENT_SECRET in your .env file. See GOOGLE_OAUTH_SETUP.md for instructions.'
-        });
-      }
-
-      // Log OAuth initiation
-      const logger = require('../../utils/logger');
-      logger.info('✅ Initiating Google OAuth flow - redirecting to Google login');
-    }
-  }, async (req, reply) => {
-    // Handler: Use passport to initiate OAuth flow and redirect to Google
-    
-    // Create Express-compatible wrapper for passport
-    const res = {
-      setHeader: (name, value) => reply.header(name, value),
-      getHeader: (name) => reply.getHeader(name),
-      redirect: (url) => {
-        reply.redirect(url);
-        return res; // Return for chaining
-      },
-      end: () => reply.send(),
-      statusCode: 200,
-      headersSent: false,
-    };
-
-    // Use passport to initiate OAuth flow - this will redirect to Google
-    return new Promise((resolve, reject) => {
-      passport.authenticate('google', {
-        scope: ['profile', 'email'],
-        session: false
-      })(req, res, (err) => {
-        if (err) {
-          const logger = require('../../utils/logger');
-          logger.error({ error: err.message }, 'Google OAuth initiation failed');
-          reject(err);
-        } else {
-          // Don't resolve - let Passport handle the redirect
-          resolve();
-        }
+  fastify.get('/google', async (request, reply) => {
+    // Check if OAuth is configured
+    if (!isGoogleOAuthConfigured()) {
+      return reply.code(503).send({
+        error: 'Service Unavailable',
+        message: 'Google OAuth is not configured on this server',
+        details: 'Please set GOOGLE_CLIENT_SECRET in your .env file.'
       });
-    });
+    }
+
+    const logger = require('../../utils/logger');
+    logger.info('✅ Initiating Google OAuth flow - redirecting to Google login');
+
+    // Trigger passport authentication
+    return request.fastifyPassport.authenticate('google', {
+      scope: ['profile', 'email'],
+      session: false
+    })(request, reply);
   });
 
   // GET /auth/google/callback - Google OAuth callback
-  fastify.get('/google/callback', {
-    schema: {
-      description: 'Google OAuth 2.0 callback handler',
-      tags: ['auth'],
-      querystring: {
-        type: 'object',
-        properties: {
-          code: { type: 'string', description: 'OAuth authorization code' },
-          state: { type: 'string', description: 'OAuth state parameter' },
-          error: { type: 'string', description: 'OAuth error if any' }
-        }
-      },
-      response: {
-        302: {
-          description: 'Redirect to frontend with token or error',
-          type: 'object'
-        }
-      }
-    },
-    preHandler: async (req, reply) => {
-      if (!isGoogleOAuthConfigured()) {
-        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-        return reply.redirect(`${frontendUrl}/#/login?error=oauth_not_configured`);
-      }
+  fastify.get('/google/callback', async (request, reply) => {
+    const logger = require('../../utils/logger');
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
 
-      // Check for OAuth errors
-      if (req.query.error) {
-        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-        return reply.redirect(`${frontendUrl}/#/login?error=${req.query.error}`);
-      }
+    // Check if OAuth is configured
+    if (!isGoogleOAuthConfigured()) {
+      logger.error('Google OAuth callback called but OAuth not configured');
+      return reply.redirect(`${frontendUrl}/#/login?error=oauth_not_configured`);
+    }
 
-      // Use passport to handle callback
-      try {
-        await authController.createPassportAuthenticator('google', {
-          session: false,
-          failureRedirect: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/#/login?error=oauth_failed`
-        })(req, reply);
-      } catch (err) {
-        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    // Check for OAuth errors from Google
+    if (request.query.error) {
+      logger.error({ error: request.query.error }, 'Google OAuth returned error');
+      return reply.redirect(`${frontendUrl}/#/login?error=${request.query.error}`);
+    }
+
+    // Authenticate with passport
+    return request.fastifyPassport.authenticate('google', {
+      session: false
+    }, (err, user, info) => {
+      if (err) {
+        logger.error({ error: err.message }, '❌ Google OAuth authentication error');
         return reply.redirect(`${frontendUrl}/#/login?error=oauth_error`);
       }
-    },
-    handler: authController.googleAuthCallback
+
+      if (!user) {
+        logger.warn({ info }, '❌ Google OAuth authentication failed - no user');
+        return reply.redirect(`${frontendUrl}/#/login?error=oauth_failed`);
+      }
+
+      // Attach user to request
+      request.user = user;
+      logger.info({ userId: user.id, email: user.email }, '✅ Google OAuth user authenticated');
+
+      // Call the callback handler
+      return authController.googleAuthCallback(request, reply);
+    })(request, reply);
   });
 }
 

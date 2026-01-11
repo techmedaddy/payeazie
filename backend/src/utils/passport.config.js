@@ -50,7 +50,7 @@ function initializeGoogleStrategy() {
         clientID,
         clientSecret,
         callbackURL,
-        scope: ['profile', 'email'],
+        passReqToCallback: false,
       },
       async (accessToken, refreshToken, profile, done) => {
         try {
@@ -60,16 +60,16 @@ function initializeGoogleStrategy() {
 
           if (!email) {
             logger.error({ googleId }, 'Google profile has no email');
-            return done(new Error('No email provided by Google'), null);
+            return done(new Error('No email provided by Google'), false);
           }
 
-          logger.info({ googleId, email }, 'Google OAuth callback received');
+          logger.info({ googleId, email }, '✅ Google OAuth callback received');
 
           // Check if user exists with this Google ID
           let user = await UserModel.findByGoogleId(googleId);
 
           if (user) {
-            logger.info({ userId: user.id, email }, 'Existing Google user found');
+            logger.info({ userId: user.id, email }, '✅ Existing Google user found');
             return done(null, user);
           }
 
@@ -78,17 +78,17 @@ function initializeGoogleStrategy() {
 
           if (user) {
             // Link Google ID to existing account
-            logger.info({ userId: user.id, email }, 'Linking Google ID to existing account');
+            logger.info({ userId: user.id, email }, '✅ Linking Google ID to existing account');
             
             // Update user with Google ID
             const updatedUser = await UserModel.update(user.id, { googleId });
             
-            logger.info({ userId: updatedUser.id, email }, 'Google ID linked to existing account');
+            logger.info({ userId: updatedUser.id, email }, '✅ Google ID linked to existing account');
             return done(null, updatedUser);
           }
 
           // Create new user with Google account
-          logger.info({ email, googleId }, 'Creating new user from Google account');
+          logger.info({ email, googleId }, '✅ Creating new user from Google account');
           
           const newUser = await UserModel.create({
             email,
@@ -97,17 +97,17 @@ function initializeGoogleStrategy() {
             role: 'user',
           });
 
-          logger.info({ userId: newUser.id, email }, 'New user created from Google account');
+          logger.info({ userId: newUser.id, email }, '✅ New user created from Google account');
           return done(null, newUser);
         } catch (error) {
-          logger.error({ error: error.message, profile: profile.id }, 'Google OAuth error');
-          return done(error, null);
+          logger.error({ error: error.message, profile: profile.id }, '❌ Google OAuth error');
+          return done(error, false);
         }
       }
     )
   );
 
-  logger.info({ callbackURL }, 'Google OAuth strategy initialized');
+  logger.info({ callbackURL }, '✅ Google OAuth strategy initialized');
   return true;
 }
 

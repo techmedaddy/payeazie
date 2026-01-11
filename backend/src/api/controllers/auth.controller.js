@@ -422,14 +422,13 @@ async function googleAuth(req, reply) {
  */
 async function googleAuthCallback(request, reply) {
   try {
-    // User is attached by passport middleware
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    
+    // User should be attached by passport
     const user = request.user;
 
     if (!user) {
-      logger.error('Google OAuth callback: No user attached');
-      
-      // Redirect to frontend with error
-      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+      logger.error('❌ Google OAuth callback: No user attached');
       return reply.redirect(`${frontendUrl}/#/login?error=oauth_failed`);
     }
 
@@ -437,58 +436,21 @@ async function googleAuthCallback(request, reply) {
     const token = generateToken(user.id);
     logger.info({ userId: user.id, email: user.email }, '✅ JWT issued for Google OAuth user');
 
-    // Redirect to frontend with token in URL
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-    
+    // Redirect to frontend with token in URL hash
     logger.info({ 
       userId: user.id, 
       email: user.email, 
       frontendUrl 
     }, '✅ Google OAuth callback completed');
     
-    return reply.redirect(`${frontendUrl}/#/auth/google/callback?token=${token}`);
+    // Redirect to dashboard with token
+    return reply.redirect(`${frontendUrl}/#/dashboard?token=${token}`);
   } catch (error) {
-    logger.error({ error }, 'Google OAuth callback error');
+    logger.error({ error: error.message }, '❌ Google OAuth callback error');
     
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
     return reply.redirect(`${frontendUrl}/#/login?error=oauth_error`);
   }
-}
-
-/**
- * Passport authenticate middleware wrapper for Fastify
- * Creates an Express-compatible response wrapper for Passport
- */
-function createPassportAuthenticator(strategy, options = {}) {
-  return (req, reply) => {
-    return new Promise((resolve, reject) => {
-      // Create Express-compatible response object wrapper
-      const res = {
-        setHeader: (name, value) => reply.header(name, value),
-        getHeader: (name) => reply.getHeader(name),
-        redirect: (url) => reply.redirect(url),
-        end: () => reply.send(),
-        statusCode: 200,
-        headersSent: false,
-      };
-
-      passport.authenticate(strategy, options, (err, user, info) => {
-        if (err) {
-          logger.error({ error: err.message, strategy }, 'Passport authentication error');
-          return reject(err);
-        }
-        
-        if (!user) {
-          logger.warn({ strategy, info }, 'Passport authentication failed - no user');
-          return resolve(null);
-        }
-
-        // Attach user to request
-        req.user = user;
-        resolve(user);
-      })(req, res);
-    });
-  };
 }
 
 module.exports = {
@@ -499,5 +461,4 @@ module.exports = {
   resetPassword,
   googleAuth,
   googleAuthCallback,
-  createPassportAuthenticator,
 };
