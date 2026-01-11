@@ -422,21 +422,34 @@ async function googleAuth(req, reply) {
  */
 async function googleAuthCallback(request, reply) {
   try {
+    console.log('✅ googleAuthCallback() called');
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
     
     // User should be attached by passport
     const user = request.user;
 
     if (!user) {
+      console.log('❌ No user in request.user');
       logger.error('❌ Google OAuth callback: No user attached');
       return reply.redirect(`${frontendUrl}/#/login?error=oauth_failed`);
     }
 
+    console.log('✅ User verified in controller:', {
+      id: user.id,
+      email: user.email,
+      name: user.name
+    });
+
     // Generate JWT token
     const token = generateToken(user.id);
+    console.log('✅ JWT issued:', token.substring(0, 20) + '...');
+    console.log('   Token length:', token.length);
     logger.info({ userId: user.id, email: user.email }, '✅ JWT issued for Google OAuth user');
 
     // Redirect to frontend with token in URL hash
+    const redirectUrl = `${frontendUrl}/#/dashboard?token=${token}`;
+    console.log('✅ Redirecting to:', redirectUrl.substring(0, 80) + '...');
+    
     logger.info({ 
       userId: user.id, 
       email: user.email, 
@@ -444,8 +457,11 @@ async function googleAuthCallback(request, reply) {
     }, '✅ Google OAuth callback completed');
     
     // Redirect to dashboard with token
-    return reply.redirect(`${frontendUrl}/#/dashboard?token=${token}`);
+    return reply.redirect(redirectUrl);
   } catch (error) {
+    console.error('❌ Google OAuth error:', error);
+    console.error('   Error message:', error.message);
+    console.error('   Error stack:', error.stack);
     logger.error({ error: error.message }, '❌ Google OAuth callback error');
     
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';

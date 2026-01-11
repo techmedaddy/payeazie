@@ -10,7 +10,7 @@ const { passport, isGoogleOAuthConfigured } = require('../../utils/passport.conf
 async function authRoutes(fastify, options) {
   // POST /auth/register - Register new user
   fastify.post('/register', {
-    config: { rateLimit: { max: 5, timeWindow: '1 hour' } },
+    config: { rateLimit: { max: 100, timeWindow: '1 hour' } },
     schema: {
       description: 'Register a new user account',
       tags: ['auth'],
@@ -81,7 +81,7 @@ async function authRoutes(fastify, options) {
 
   // POST /auth/login - Login user
   fastify.post('/login', {
-    config: { rateLimit: { max: 5, timeWindow: '1 hour' } },
+    config: { rateLimit: { max: 100, timeWindow: '1 hour' } },
     schema: {
       description: 'Login with email and password',
       tags: ['auth'],
@@ -290,8 +290,13 @@ async function authRoutes(fastify, options) {
 
   // GET /auth/google - Initiate Google OAuth
   fastify.get('/google', async (request, reply) => {
+    console.log('✅ /api/auth/google route hit');
+    console.log('   Request URL:', request.url);
+    console.log('   Request headers:', JSON.stringify(request.headers, null, 2));
+    
     // Check if OAuth is configured
     if (!isGoogleOAuthConfigured()) {
+      console.log('❌ Google OAuth not configured');
       return reply.code(503).send({
         error: 'Service Unavailable',
         message: 'Google OAuth is not configured on this server',
@@ -301,6 +306,7 @@ async function authRoutes(fastify, options) {
 
     const logger = require('../../utils/logger');
     logger.info('✅ Initiating Google OAuth flow - redirecting to Google login');
+    console.log('✅ Calling passport.authenticate for Google OAuth...');
 
     // Trigger passport authentication
     return request.fastifyPassport.authenticate('google', {
@@ -311,39 +317,57 @@ async function authRoutes(fastify, options) {
 
   // GET /auth/google/callback - Google OAuth callback
   fastify.get('/google/callback', async (request, reply) => {
+    console.log('✅ /api/auth/google/callback route hit');
+    console.log('   Query params:', JSON.stringify(request.query, null, 2));
+    
     const logger = require('../../utils/logger');
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
 
     // Check if OAuth is configured
     if (!isGoogleOAuthConfigured()) {
+      console.log('❌ OAuth not configured in callback');
       logger.error('Google OAuth callback called but OAuth not configured');
       return reply.redirect(`${frontendUrl}/#/login?error=oauth_not_configured`);
     }
 
     // Check for OAuth errors from Google
     if (request.query.error) {
+      console.log('❌ Google returned error:', request.query.error);
       logger.error({ error: request.query.error }, 'Google OAuth returned error');
       return reply.redirect(`${frontendUrl}/#/login?error=${request.query.error}`);
     }
 
+    console.log('✅ Authenticating with passport...');
+    
     // Authenticate with passport
     return request.fastifyPassport.authenticate('google', {
       session: false
     }, (err, user, info) => {
       if (err) {
+        console.error('❌ Google OAuth error:', err);
+        console.error('   Error stack:', err.stack);
         logger.error({ error: err.message }, '❌ Google OAuth authentication error');
         return reply.redirect(`${frontendUrl}/#/login?error=oauth_error`);
       }
 
       if (!user) {
+        console.log('❌ No user returned from passport');
+        console.log('   Info:', info);
         logger.warn({ info }, '❌ Google OAuth authentication failed - no user');
         return reply.redirect(`${frontendUrl}/#/login?error=oauth_failed`);
       }
 
       // Attach user to request
       request.user = user;
+      console.log('✅ request.user:', JSON.stringify({
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        googleId: user.google_id || user.googleId
+      }, null, 2));
       logger.info({ userId: user.id, email: user.email }, '✅ Google OAuth user authenticated');
 
+      console.log('✅ Calling googleAuthCallback controller...');
       // Call the callback handler
       return authController.googleAuthCallback(request, reply);
     })(request, reply);

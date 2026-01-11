@@ -38,10 +38,10 @@ function onExceeded(req, key) {
 
 /**
  * Rate limiter options for sensitive routes
- * Limits: 5 requests per hour
+ * Limits: 100 requests per hour (increased for testing)
  */
 const rateLimitOptions = {
-  max: 5,                    // Maximum 5 requests
+  max: 100,                  // Maximum 100 requests
   timeWindow: '1 hour',      // Per hour
   cache: 10000,              // Keep 10k entries in cache
   allowList: [],             // No IP whitelist
