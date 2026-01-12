@@ -73,9 +73,14 @@ export const usePaymentDetails = (paymentId: string): UsePaymentDetailsResult =>
     } catch (err: any) {
       setLoading(false);
       
+      console.error('❌ Failed to fetch payment details:', err);
+      
       if (err.statusCode === 404) {
         setNotFound(true);
         setError('Payment not found');
+      } else if (err.statusCode === 403) {
+        setNotFound(true);
+        setError('You do not have permission to view this payment');
       } else if (err.statusCode && err.statusCode >= 500) {
         setError('Internal Server Error. Please try again later.');
       } else {
@@ -92,7 +97,8 @@ export const usePaymentDetails = (paymentId: string): UsePaymentDetailsResult =>
         timerIntervalRef.current = null;
       }
       
-      throw err;
+      // Don't throw - let the component handle the error state
+      return null;
     }
   }, [paymentId]);
 

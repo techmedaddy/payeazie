@@ -31,6 +31,35 @@ const PaymentDetails: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
 
+  // Filtered and sorted audit log (must be called before conditional returns)
+  const filteredAndSortedAuditLog = useMemo(() => {
+    if (!payment?.audit_log) return [];
+    
+    // Filter by status
+    let filtered = payment.audit_log;
+    if (statusFilter !== 'all') {
+      filtered = payment.audit_log.filter(entry => 
+        entry.new_status.toLowerCase() === statusFilter.toLowerCase()
+      );
+    }
+    
+    // Sort by timestamp
+    const sorted = [...filtered].sort((a, b) => {
+      const dateA = new Date(a.changed_at).getTime();
+      const dateB = new Date(b.changed_at).getTime();
+      return sortOrder === 'asc' ? dateA - dateB : dateB - dateA;
+    });
+    
+    return sorted;
+  }, [payment?.audit_log, statusFilter, sortOrder]);
+
+  // Get unique statuses for filter dropdown (must be called before conditional returns)
+  const availableStatuses = useMemo(() => {
+    if (!payment?.audit_log) return [];
+    const statuses = new Set(payment.audit_log.map(entry => entry.new_status.toLowerCase()));
+    return Array.from(statuses);
+  }, [payment?.audit_log]);
+
   // Loading state
   if (loading) {
     return (
@@ -107,28 +136,6 @@ const PaymentDetails: React.FC = () => {
   
   const currentStepIndex = steps.findIndex(s => s.id === status);
 
-  // Filtered and sorted audit log
-  const filteredAndSortedAuditLog = useMemo(() => {
-    if (!payment.audit_log) return [];
-    
-    // Filter by status
-    let filtered = payment.audit_log;
-    if (statusFilter !== 'all') {
-      filtered = payment.audit_log.filter(entry => 
-        entry.new_status.toLowerCase() === statusFilter.toLowerCase()
-      );
-    }
-    
-    // Sort by timestamp
-    const sorted = [...filtered].sort((a, b) => {
-      const dateA = new Date(a.changed_at).getTime();
-      const dateB = new Date(b.changed_at).getTime();
-      return sortOrder === 'asc' ? dateA - dateB : dateB - dateA;
-    });
-    
-    return sorted;
-  }, [payment.audit_log, statusFilter, sortOrder]);
-
   // Format timestamp for display
   const formatTimestamp = (timestamp: string) => {
     const date = new Date(timestamp);
@@ -140,13 +147,6 @@ const PaymentDetails: React.FC = () => {
     const seconds = String(date.getSeconds()).padStart(2, '0');
     return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
   };
-
-  // Get unique statuses for filter dropdown
-  const availableStatuses = useMemo(() => {
-    if (!payment.audit_log) return [];
-    const statuses = new Set(payment.audit_log.map(entry => entry.new_status.toLowerCase()));
-    return Array.from(statuses);
-  }, [payment.audit_log]);
 
   return (
     <div className="p-4 md:p-8 min-h-screen bg-slate-50">

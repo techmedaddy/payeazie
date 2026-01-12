@@ -53,12 +53,23 @@ const validateIntentFields = ({ orderId, amount, currency, idempotencyKey }) => 
 const createPaymentIntent = async (req, reply) => {
     // Log incoming request details
     const logger = require('../../utils/logger');
+    
+    console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log('💰 CREATE PAYMENT INTENT');
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log('📋 Request User:', JSON.stringify(req.user, null, 2));
+    console.log('📋 User ID:', req.user?.id);
+    console.log('📋 User Email:', req.user?.email);
+    console.log('📋 User Role:', req.user?.role);
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+    
     logger.info({
         body: req.body,
         headers: {
             'idempotency-key': req.headers['idempotency-key'],
             'content-type': req.headers['content-type']
-        }
+        },
+        user: req.user
     }, 'createPaymentIntent: incoming request');
 
     const { orderId, amount, currency } = req.body || {};
