@@ -128,7 +128,7 @@ module.exports = async function paymentRoutes(fastify) {
     { 
       schema: listPaymentsSchema,
       preHandler: [authMiddleware],
-      config: { rateLimit: { max: 5, timeWindow: '1 hour' } }
+      config: { rateLimit: { max: 100, timeWindow: '1 hour' } }
     },
     paymentController.listPayments
   );
@@ -139,7 +139,7 @@ module.exports = async function paymentRoutes(fastify) {
     { 
       schema: getPaymentSchema,
       preHandler: [authMiddleware],
-      config: { rateLimit: { max: 5, timeWindow: '1 hour' } }
+      config: { rateLimit: { max: 50, timeWindow: '1 hour' } }
     },
     paymentController.getPaymentStatus
   );

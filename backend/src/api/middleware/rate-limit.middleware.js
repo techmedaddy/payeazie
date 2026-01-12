@@ -49,10 +49,12 @@ const rateLimitOptions = {
   keyGenerator,              // Use custom key generator
   onExceeding,               // Log when approaching limit
   onExceeded,                // Log when exceeded
+  statusCode: 429,           // Return 429 Too Many Requests
   errorResponseBuilder: (req, context) => {
     return {
-      error: 'Too many requests',
-      message: 'You have exceeded the limit of 5 requests per hour.',
+      statusCode: 429,
+      error: 'Too Many Requests',
+      message: `You have exceeded the limit of ${context.max} requests per hour.`,
       retryAfter: context.after
     };
   }
