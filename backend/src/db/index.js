@@ -54,6 +54,10 @@ const connectionOptions = {
     process.env.DB_SSL === 'true'
       ? { rejectUnauthorized: false }
       : false,
+  // Force IPv4 to avoid IPv6 connection issues
+  connectionTimeoutMillis: 10000,
+  // Additional pg connection options
+  options: '--client_encoding=UTF8'
 };
 
 /**
