@@ -36,13 +36,14 @@ export const useAuth = (): UseAuthResult => {
       console.log('   Token present:', !!token);
       console.log('   Token length:', token.length);
       
-      const response = await api.get<{ user: User }>('/api/auth/me');
+      const response = await api.get<{ success: boolean; data: { user: User } }>('/api/auth/me');
       
       console.log('✅ Authenticated API call succeeded');
-      console.log('   User:', response.user.email);
-      console.log('   Role:', response.user.role);
+      console.log('   Response:', response);
+      console.log('   User:', response.data.user.email);
+      console.log('   Role:', response.data.user.role);
       
-      setUser(response.user);
+      setUser(response.data.user);
     } catch (error) {
       console.error('❌ Failed to fetch user:', error);
       api.clearAuthToken();
@@ -62,17 +63,17 @@ export const useAuth = (): UseAuthResult => {
     console.log('🔵 Attempting login');
     console.log('   Email:', email);
     
-    const response = await api.post<{ token: string; user: User }>(
+    const response = await api.post<{ success: boolean; data: { token: string; user: User } }>(
       '/api/auth/login',
       { email, password }
     );
     
     console.log('✅ Login successful');
-    console.log('   User:', response.user.email);
-    console.log('   Token received, length:', response.token.length);
+    console.log('   User:', response.data.user.email);
+    console.log('   Token received, length:', response.data.token.length);
     
-    api.setAuthToken(response.token);
-    setUser(response.user);
+    api.setAuthToken(response.data.token);
+    setUser(response.data.user);
     
     console.log('✅ Token stored in localStorage');
   };

@@ -325,27 +325,37 @@ async function authRoutes(fastify, options) {
   // GET /auth/google/callback - Google OAuth callback
   fastify.get('/google/callback', async (request, reply) => {
     try {
-      console.log('✅ /api/auth/google/callback route hit');
+      console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.log('✅ CALLBACK ROUTE HIT: /api/auth/google/callback');
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.log('📋 Step 1: Route handler invoked');
       console.log('   Query params:', JSON.stringify(request.query, null, 2));
+      console.log('   Request method:', request.method);
+      console.log('   Request URL:', request.url);
       
       const logger = require('../../utils/logger');
       const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
       
       // Check if OAuth is configured
+      console.log('\n📋 Step 2: Verifying OAuth configuration');
       if (!isGoogleOAuthConfigured()) {
         console.log('❌ OAuth not configured in callback');
         logger.error('Google OAuth callback called but OAuth not configured');
         return reply.redirect(`${frontendUrl}/#/login?error=oauth_not_configured`);
       }
+      console.log('✅ OAuth is properly configured');
 
       // Check for OAuth errors from Google
+      console.log('\n📋 Step 3: Checking for OAuth errors from Google');
       if (request.query.error) {
         console.log('❌ Google returned error:', request.query.error);
         logger.error({ error: request.query.error }, 'Google OAuth returned error');
         return reply.redirect(`${frontendUrl}/#/login?error=${request.query.error}`);
       }
+      console.log('✅ No OAuth errors from Google');
 
       // Get the authorization code
+      console.log('\n📋 Step 4: Extracting authorization code');
       const code = request.query.code;
       if (!code) {
         console.log('❌ No authorization code in callback');
@@ -356,12 +366,16 @@ async function authRoutes(fastify, options) {
       console.log('✅ Authorization code received:', code.substring(0, 20) + '...');
 
       // Exchange code for tokens
+      console.log('\n📋 Step 5: Exchanging authorization code for tokens');
       const axios = require('axios');
       const clientId = process.env.GOOGLE_CLIENT_ID;
       const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
       const callbackURL = process.env.GOOGLE_CALLBACK_URL || 'http://localhost:3467/api/auth/google/callback';
 
-      console.log('✅ Exchanging code for tokens...');
+      console.log('   Client ID configured:', clientId ? 'Yes' : 'No');
+      console.log('   Client Secret configured:', clientSecret ? 'Yes' : 'No');
+      console.log('   Callback URL:', callbackURL);
+
       const tokenResponse = await axios.post('https://oauth2.googleapis.com/token', {
         code,
         client_id: clientId,
@@ -371,53 +385,86 @@ async function authRoutes(fastify, options) {
       });
 
       const { access_token } = tokenResponse.data;
-      console.log('✅ Access token received');
+      console.log('✅ Access token received:', access_token ? access_token.substring(0, 20) + '...' : 'MISSING');
 
       // Get user profile from Google
-      console.log('✅ Fetching user profile from Google...');
+      console.log('\n📋 Step 6: Fetching user profile from Google');
       const profileResponse = await axios.get('https://www.googleapis.com/oauth2/v2/userinfo', {
         headers: { Authorization: `Bearer ${access_token}` }
       });
 
       const profile = profileResponse.data;
-      console.log('✅ Google profile received:', {
+      console.log('✅ Google profile received:');
+      console.log('   - Google ID:', profile.id);
+      console.log('   - Email:', profile.email);
+      console.log('   - Name:', profile.name);
+      console.log('   - Picture:', profile.picture);
+      console.log('   - Verified Email:', profile.verified_email);
+
+      // Verify user object structure (equivalent to request.user in passport)
+      console.log('\n📋 Step 7: Verifying user object structure');
+      const userObject = {
         id: profile.id,
         email: profile.email,
-        name: profile.name
-      });
+        displayName: profile.name
+      };
+      console.log('✅ User object constructed:', JSON.stringify(userObject, null, 2));
+
+      if (!userObject.email) {
+        console.log('❌ ERROR: request.user.email is UNDEFINED');
+        logger.error({ userObject }, 'User object missing email');
+        return reply.redirect(`${frontendUrl}/#/login?error=no_email`);
+      }
+      console.log('✅ user.email verified:', userObject.email);
+
+      if (!userObject.id) {
+        console.log('❌ ERROR: request.user.id is UNDEFINED');
+        logger.error({ userObject }, 'User object missing ID');
+        return reply.redirect(`${frontendUrl}/#/login?error=no_user_id`);
+      }
+      console.log('✅ user.id verified:', userObject.id);
+
+      if (!userObject.displayName) {
+        console.log('⚠️  WARNING: request.user.displayName is UNDEFINED (will use email)');
+      } else {
+        console.log('✅ user.displayName verified:', userObject.displayName);
+      }
 
       // Find or create user
+      console.log('\n📋 Step 8: Finding or creating user in database');
       const UserModel = require('../../db/models/user.model');
       const googleId = profile.id;
       const email = profile.email;
       const name = profile.name;
 
-      if (!email) {
-        console.log('❌ No email in Google profile');
-        logger.error({ googleId }, 'Google profile has no email');
-        return reply.redirect(`${frontendUrl}/#/login?error=no_email`);
-      }
-
-      console.log('✅ Processing user with email:', email);
+      console.log('   Searching for user with Google ID:', googleId);
 
       // Check if user exists with this Google ID
       let user = await UserModel.findByGoogleId(googleId);
 
       if (user) {
         console.log('✅ Found existing user by Google ID:', user.id);
+        console.log('   User details:', {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          createdAt: user.createdAt
+        });
         logger.info({ userId: user.id, email }, '✅ Existing Google user found');
       } else {
+        console.log('   No user found with Google ID, searching by email...');
         // Check if user exists with this email
         user = await UserModel.findByEmail(email);
 
         if (user) {
           console.log('✅ Found existing user by email, linking Google ID');
+          console.log('   Existing user ID:', user.id);
           logger.info({ userId: user.id, email }, '✅ Linking Google ID to existing account');
           user = await UserModel.update(user.id, { googleId });
           console.log('✅ Google ID linked to user:', user.id);
         } else {
           // Create new user
-          console.log('✅ Creating new user from Google account');
+          console.log('   No existing user found, creating new user...');
           logger.info({ email, googleId }, '✅ Creating new user from Google account');
           
           user = await UserModel.create({
@@ -427,20 +474,34 @@ async function authRoutes(fastify, options) {
             role: 'user',
           });
 
-          console.log('✅ New user created:', user.id);
+          console.log('✅ New user created successfully');
+          console.log('   New user details:', {
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            googleId: user.googleId
+          });
           logger.info({ userId: user.id, email }, '✅ New user created from Google account');
         }
       }
 
       // Generate JWT token
+      console.log('\n📋 Step 9: Generating JWT token');
       const { generateToken } = require('../controllers/auth.controller');
       const token = generateToken(user.id);
-      console.log('✅ JWT issued:', token.substring(0, 20) + '...');
+      console.log('✅ JWT ISSUED:', token.substring(0, 30) + '...');
+      console.log('   Token payload - userId:', user.id);
+      console.log('   Token length:', token.length, 'characters');
       logger.info({ userId: user.id, email: user.email }, '✅ JWT issued for Google OAuth user');
 
       // Redirect to frontend with token
-      const redirectUrl = `${frontendUrl}/#/dashboard?token=${token}`;
-      console.log('✅ Redirecting to:', redirectUrl.substring(0, 80) + '...');
+      console.log('\n📋 Step 10: Redirecting to frontend with token');
+      const redirectUrl = `${frontendUrl}/#/auth/google/callback?token=${token}`;
+      console.log('✅ REDIRECTED TO FRONTEND WITH TOKEN');
+      console.log('   Full redirect URL:', redirectUrl.substring(0, 80) + '...');
+      console.log('   Frontend URL:', frontendUrl);
+      console.log('   Target route: /#/auth/google/callback');
+      console.log('   Token in URL: Yes');
       
       logger.info({ 
         userId: user.id, 
@@ -448,10 +509,26 @@ async function authRoutes(fastify, options) {
         frontendUrl 
       }, '✅ Google OAuth callback completed');
       
+      console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.log('✅ GOOGLE OAUTH CALLBACK COMPLETED SUCCESSFULLY');
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+      
       return reply.redirect(redirectUrl);
       
     } catch (error) {
-      console.error('❌ Google OAuth callback error:', error);
+      console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.error('❌ GOOGLE OAUTH CALLBACK ERROR');
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.error('   Error message:', error.message);
+      console.error('   Error name:', error.name);
+      if (error.response) {
+        console.error('   Response status:', error.response.status);
+        console.error('   Response data:', JSON.stringify(error.response.data, null, 2));
+      }
+      console.error('   Stack trace:');
+      console.error(error.stack);
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+      
       const logger = require('../../utils/logger');
       const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
       logger.error({ error: error.message, stack: error.stack }, '❌ Google OAuth callback error');

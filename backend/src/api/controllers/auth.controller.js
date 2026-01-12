@@ -477,4 +477,5 @@ module.exports = {
   resetPassword,
   googleAuth,
   googleAuthCallback,
+  generateToken,
 };

@@ -20,8 +20,32 @@ const Login: React.FC = () => {
 
   // Check for OAuth error in URL
   useEffect(() => {
+    console.log('🔍 Login page mounted, checking URL for token/error');
+    console.log('   location.search:', location.search);
+    console.log('   location.hash:', location.hash);
+    console.log('   window.location.href:', window.location.href);
+    
     const searchParams = new URLSearchParams(location.search);
     const oauthError = searchParams.get('error');
+    
+    // Check for OAuth token in URL (from Google OAuth callback)
+    const token = searchParams.get('token');
+    
+    console.log('   Token in URL:', token ? 'YES' : 'NO');
+    console.log('   Error in URL:', oauthError ? oauthError : 'NO');
+    
+    if (token) {
+      console.log('✅ JWT token found in Login page URL');
+      console.log('   Token length:', token.length);
+      console.log('   Storing token and redirecting to dashboard...');
+      
+      // Store token
+      localStorage.setItem('authToken', token);
+      
+      // Redirect to dashboard
+      navigate('/dashboard', { replace: true });
+      return;
+    }
     
     if (oauthError) {
       const errorMessages: Record<string, string> = {
@@ -32,7 +56,7 @@ const Login: React.FC = () => {
       
       setError(errorMessages[oauthError] || 'An unexpected error occurred during login.');
     }
-  }, [location.search]);
+  }, [location.search, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
