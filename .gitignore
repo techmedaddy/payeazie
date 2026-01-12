@@ -1,2 +1,7 @@
 node_modules
 SYSTEM_PROMPT.md
+
+# Environment files
+.env
+.env.*
+!.env.example
