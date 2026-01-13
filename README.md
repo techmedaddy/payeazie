@@ -564,7 +564,6 @@ npm run test:oauth
 ---
 
 
-```
 
 ---
 
@@ -572,14 +571,26 @@ npm run test:oauth
 
 1. Fork the repo
 2. Create feature branch (`git checkout -b feature/my-feature`)
-
+3. Follow SYSTEM_PROMPT.md guidelines
+4. Test locally (`npm test`)
+5. Push & create PR
+6. CI/CD pipeline validates before merge
 
 ---
 
 
-## 📞 Support
 
-For issues, questions, or feature requests, open a GitHub Issue. For security vulnerabilities, email umarejazimam69@gmail.com 
+---
 
-Do check out my blog at -
-https://techmedaddy.medium.com/idempotency-a-deep-dive-triggered-by-a-real-world-double-charge-failure-7cf1b5c4356f
+## 📧 Support
+
+For issues, questions, or feature requests, open a GitHub Issue. For security vulnerabilities, email **umarejazimam69@gmail.com**
+
+**Check out my blog:** [Idempotency: A Deep Dive Triggered by a Real-World Double-Charge Failure](https://techmedaddy.medium.com/idempotency-a-deep-dive-triggered-by-a-real-world-double-charge-failure-7cf1b5c4356f)
+
+---
+
+
+
+
+
