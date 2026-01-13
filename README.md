@@ -161,31 +161,48 @@ Frontend Components:
 
 ## 🔐 Authentication & Security Architecture
 
-```mermaid
-graph LR
-    User["👤 User"]
-    FE["Frontend"]
-    AUTH_API["POST /auth/login<br/>POST /auth/register<br/>POST /auth/google<br/>POST /auth/reset-password"]
-    VALIDATE["Validate Input<br/>Rate Limit Check<br/>Hash Password"]
-    DB[(PostgreSQL)]
-    SESSION["Generate JWT<br/>(exp: 24h)"]
-    
-    User -->|Email/Pass| FE
-    FE -->|Credentials| AUTH_API
-    AUTH_API -->|Validate| VALIDATE
-    VALIDATE -->|Query User| DB
-    DB -->|Return User| SESSION
-    SESSION -->|JWT Token| FE
-    FE -->|Authorization: Bearer {token}| AUTH_API
-    
-    AUTH_API -->|Validate JWT| FE
-    
-    style User fill:#e1f5ff
-    style FE fill:#61dafb
-    style AUTH_API fill:#68a063
-    style VALIDATE fill:#ff9800
-    style SESSION fill:#2196f3
-    style DB fill:#3ecf8e
+```
+┌─────────────────────────────────────────────────┐
+│                   User Login                     │
+└────────────────────┬────────────────────────────┘
+                     │
+                     ▼
+          ┌──────────────────────┐
+          │  Email / Password    │
+          │  or Google OAuth     │
+          └──────────┬───────────┘
+                     │
+                     ▼
+          ┌──────────────────────────────┐
+          │  POST /auth/login             │
+          │  POST /auth/register          │
+          │  POST /auth/google            │
+          │  POST /auth/reset-password    │
+          └──────────┬───────────────────┘
+                     │
+          ┌──────────▼───────────┐
+          │  Rate Limit Check    │
+          │  (5 attempts/10min)  │
+          └──────────┬───────────┘
+                     │
+          ┌──────────▼───────────────┐
+          │  Validate Input          │
+          │  Hash Password (bcrypt)  │
+          │  Query PostgreSQL        │
+          └──────────┬───────────────┘
+                     │
+          ┌──────────▼──────────────────┐
+          │  Generate JWT Token        │
+          │  (expires: 24h)            │
+          │  Refresh Token in Cookie   │
+          └──────────┬──────────────────┘
+                     │
+                     ▼
+          ┌──────────────────────┐
+          │  Return to Frontend  │
+          │  (Authorization      │
+          │   header ready)      │
+          └──────────────────────┘
 ```
 
 **Security Features:**
@@ -199,35 +216,39 @@ graph LR
 
 ## 🚀 CI/CD Pipeline & Deployment
 
-```mermaid
-graph LR
-    GH["🔀 GitHub Push<br/>(main branch)"]
-    GHA["⚙️ GitHub Actions"]
-    TEST["🧪 Run Tests<br/>(Vitest/Jest)"]
-    LINT["🔍 ESLint<br/>Prettier"]
-    BUILD["🔨 Build Frontend<br/>Compile TS"]
-    DOCKER["🐳 Build Docker<br/>Images"]
-    RENDER["☁️ Deploy to Render<br/>(Backend API)")
-    NETLIFY["🌐 Deploy to Netlify<br/>(Frontend)")
-    HEALTH["✅ Health Check<br/>(POST deploy)")
-    
-    GH -->|Webhook| GHA
-    GHA -->|npm test| TEST
-    GHA -->|npm run lint| LINT
-    TEST -->|Pass| BUILD
-    LINT -->|Pass| BUILD
-    BUILD -->|Pass| DOCKER
-    DOCKER -->|Push| RENDER
-    DOCKER -->|Push| NETLIFY
-    RENDER -->|Restart API| HEALTH
-    NETLIFY -->|Publish Static| HEALTH
-    
-    style GH fill:#333,color:#fff
-    style GHA fill:#4285f4,color:#fff
-    style TEST fill:#90ee90
-    style DOCKER fill:#2496ed,color:#fff
-    style RENDER fill:#46e3b7,color:#000
-    style NETLIFY fill:#00c7b7,color:#fff
+```
+GitHub Push (main)
+       │
+       ▼
+  GitHub Actions
+       │
+    ┌──┴──┐
+    │     │
+    ▼     ▼
+ Lint   Test
+ (ESLint,  (Vitest/Jest)
+  Prettier)
+    │     │
+    └──┬──┘
+       ▼
+    Build
+ (TS Compile +
+  Vite Bundle)
+       │
+       ▼
+  Docker Build
+ (Multi-stage)
+       │
+    ┌──┴───────┐
+    │          │
+    ▼          ▼
+  Render    Netlify
+  (API)   (Frontend)
+    │          │
+    └──────┬───┘
+           ▼
+      Health Check
+     (POST deploy)
 ```
 
 **Pipeline Stages:**
@@ -519,16 +540,10 @@ curl http://localhost:3000/metrics
 
 ---
 
-## 📄 License
-
-MIT
-
----
 
 ## 📞 Support
 
-For issues, questions, or feature requests, open a GitHub Issue. For security vulnerabilities, email security@payeazie.dev (if applicable).
+For issues, questions, or feature requests, open a GitHub Issue. For security vulnerabilities, email umarejazimam69@gmail.com 
 
----
-
-**Last Updated:** January 2026 | **Status:** Production-Ready ✅
+Do check out my blog at -
+https://techmedaddy.medium.com/idempotency-a-deep-dive-triggered-by-a-real-world-double-charge-failure-7cf1b5c4356f
