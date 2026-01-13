@@ -405,50 +405,100 @@ payeazie/
 ├── backend/
 │   ├── src/
 │   │   ├── api/
-│   │   │   ├── routes/       (payment, auth, audit)
-│   │   │   └── middleware/   (auth, errorHandler)
+│   │   │   ├── controllers/          (Request handlers)
+│   │   │   ├── routes/               (payment, auth, audit routes)
+│   │   │   └── middleware/           (auth, errorHandler, cors)
 │   │   ├── core/
-│   │   │   ├── services/     (business logic)
-│   │   │   └── models/
+│   │   │   ├── orchestrator/         (Payment orchestration logic)
+│   │   │   ├── status-transition/    (State machine for payment status)
+│   │   │   └── idempotency/          (Idempotent request handling)
 │   │   ├── db/
-│   │   │   ├── index.js      (pool, connection)
-│   │   │   └── queries/      (SQL functions)
+│   │   │   ├── config/               (Connection pooling)
+│   │   │   ├── models/               (DB queries)
+│   │   │   └── index.js              (DB exports)
 │   │   ├── workers/
-│   │   │   ├── charge.worker.js
-│   │   │   └── reconcile.worker.js
+│   │   │   ├── charge.worker.js      (Process payments via gateway)
+│   │   │   ├── reconcile.worker.js   (Sync & verify payments)
+│   │   │   └── __tests__/
 │   │   └── utils/
-│   │       ├── queue.js      (BullMQ client)
-│   │       ├── logger.js     (structured logging)
-│   │       └── helpers.js
+│   │       ├── queue.js              (BullMQ client & job management)
+│   │       ├── logger.js             (Structured logging)
+│   │       ├── metrics.js            (Prometheus metrics)
+│   │       ├── gateway-client.js     (Payment gateway API)
+│   │       ├── email.service.js      (Email notifications)
+│   │       ├── passport.config.js    (OAuth2 strategy)
+│   │       ├── payment-status.js     (Status constants)
+│   │       └── config.js             (App configuration)
+│   │
 │   ├── migrations/
 │   │   ├── 001_create_payments_table.sql
 │   │   ├── 002_create_audit_log.sql
+│   │   ├── 003_create_events_table.sql
+│   │   ├── 004_create_users_table.sql
+│   │   ├── 005_add_user_id_to_payments.sql
+│   │   ├── 006_add_role_to_users.sql
+│   │   ├── 007_create_password_resets_table.sql
+│   │   ├── 008_add_google_oauth_to_users.sql
+│   │   └── 009_add_user_tracking_to_audit_log.sql
+│   │
+│   ├── scripts/
+│   │   ├── migrate.js                (Run migrations)
+│   │   ├── seed-payments.js
+│   │   ├── monitor-dashboard.sh
 │   │   └── ...
-│   ├── server.js            (Express entry point)
+│   │
+│   ├── tests/
+│   │   ├── auth.phase1.test.js
+│   │   └── ...
+│   │
+│   ├── server.js                     (Express/Fastify entry point)
+│   ├── vitest.config.js
 │   └── package.json
 │
 ├── frontend/
-│   ├── src/
-│   │   ├── pages/           (Dashboard, PaymentDetail, etc.)
-│   │   ├── components/      (StatusBadge, PaymentCard, etc.)
-│   │   ├── context/         (AuthContext, PaymentContext)
-│   │   ├── services/        (API calls, auth logic)
-│   │   ├── hooks/           (usePayment, useAuth, etc.)
-│   │   └── utils/           (formatters, validators)
+│   ├── components/
+│   │   ├── Logo.tsx
+│   │   ├── ProtectedRoute.tsx
+│   │   └── ui/                       (UI component library)
+│   │
+│   ├── pages/
+│   │   ├── Dashboard.tsx             (User payment list)
+│   │   ├── CreatePayment.tsx         (Payment form)
+│   │   ├── PaymentDetails.tsx        (Single payment + audit log)
+│   │   ├── Login.tsx
+│   │   ├── Register.tsx
+│   │   ├── GoogleCallback.tsx        (OAuth callback handler)
+│   │   └── NotFound.tsx
+│   │
+│   ├── context/
+│   │   ├── AuthContext.tsx           (User auth state)
+│   │   └── ToastContext.tsx          (Notifications)
+│   │
+│   ├── services/
+│   │   ├── api.ts                    (HTTP client, base URL)
+│   │   ├── payments.ts               (Payment API calls)
+│   │   └── payments.test.ts
+│   │
+│   ├── hooks/                        (Custom React hooks)
+│   ├── utils/                        (Formatters, validators)
+│   │
+│   ├── App.tsx                       (Main router)
 │   ├── index.tsx
+│   ├── vite.config.ts
+│   ├── vitest.config.ts
 │   └── package.json
 │
-├── .github/
-│   └── workflows/
-│       ├── test.yml         (Unit & integration tests)
-│       ├── lint.yml         (ESLint, Prettier)
-│       └── deploy.yml       (Build & push to Render/Netlify)
-│
-├── docker-compose.yml       (Local dev: DB, Redis, API, Worker)
-├── Dockerfile              (Multi-stage build)
-├── README.md               (This file)
-└── SYSTEM_PROMPT.md        (Copilot guidelines)
+├── README.md                         (This file - project overview)
+├── SYSTEM_PROMPT.md                  (Copilot/AI guidelines)
+└── package.json                      (Root workspace config)
 ```
+
+**Key Directories:**
+- `backend/src/core/orchestrator/` – Payment processing orchestration
+- `backend/src/workers/` – BullMQ job consumers (charge, reconcile)
+- `backend/src/utils/queue.js` – Job enqueueing & event handling
+- `frontend/pages/` – Page-level components (routed)
+- `frontend/services/` – API integration & HTTP client
 
 ---
 
@@ -513,18 +563,7 @@ npm run test:oauth
 
 ---
 
-## 📊 Monitoring & Observability
 
-**Logging:** Structured JSON logs (bunyan) shipped to stdout (Render captures).  
-**Metrics:** Prometheus client tracking job queue depth, API response time, gateway errors.  
-**Alerts:** PagerDuty integration for critical failures (worker dead, queue backed up).  
-
-```bash
-# View logs
-render logs --tail
-
-# Prometheus metrics endpoint
-curl http://localhost:3000/metrics
 ```
 
 ---
@@ -533,10 +572,7 @@ curl http://localhost:3000/metrics
 
 1. Fork the repo
 2. Create feature branch (`git checkout -b feature/my-feature`)
-3. Follow SYSTEM_PROMPT.md guidelines
-4. Test locally (`npm test`)
-5. Push & create PR
-6. CI/CD pipeline validates before merge
+
 
 ---
 
