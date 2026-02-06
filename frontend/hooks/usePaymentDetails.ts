@@ -13,16 +13,36 @@ interface AuditLogEntry {
 
 interface PaymentDetails {
   id: string;
-  order_id: string;
+  orderId: string;
   amount: string;
   currency: string;
   status: string;
-  gateway_transaction_id: string | null;
-  idempotency_key: string;
-  created_at: string;
-  updated_at: string;
-  user_id: number | null;
+  gatewayTransactionId: string | null;
+  idempotencyKey: string;
+  createdAt: string;
+  updatedAt: string;
+  userId: number | null;
   audit_log?: AuditLogEntry[];
+}
+
+/**
+ * Transform API response to consistent camelCase format.
+ * Handles both camelCase (from controller transform) and snake_case (fallback).
+ */
+function transformPaymentDetails(data: any): PaymentDetails {
+  return {
+    id: data.id,
+    orderId: data.orderId || data.order_id,
+    amount: data.amount,
+    currency: data.currency,
+    status: data.status,
+    gatewayTransactionId: data.gatewayChargeId || data.gatewayTransactionId || data.gateway_charge_id || data.gateway_transaction_id || null,
+    idempotencyKey: data.idempotencyKey || data.idempotency_key,
+    createdAt: data.createdAt || data.created_at,
+    updatedAt: data.updatedAt || data.updated_at,
+    userId: data.userId || data.user_id || null,
+    audit_log: data.audit_log || data.auditLog,
+  };
 }
 
 interface UsePaymentDetailsResult {
@@ -53,7 +73,8 @@ export const usePaymentDetails = (paymentId: string): UsePaymentDetailsResult =>
       setError(null);
       setNotFound(false);
       
-      const data = await api.get<PaymentDetails>(`/api/payments/${paymentId}`);
+      const rawData = await api.get<any>(`/api/payments/${paymentId}`);
+      const data = transformPaymentDetails(rawData);
       setPayment(data);
       setLoading(false);
       

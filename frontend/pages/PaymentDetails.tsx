@@ -267,7 +267,7 @@ const PaymentDetails: React.FC = () => {
                   </div>
                   <div>
                     <p className="text-sm text-slate-500">Order ID</p>
-                    <p className="font-medium text-slate-900">{payment.order_id}</p>
+                    <p className="font-medium text-slate-900">{payment.orderId}</p>
                   </div>
                 </div>
 
@@ -278,7 +278,7 @@ const PaymentDetails: React.FC = () => {
                   <div className="flex-1">
                     <p className="text-sm text-slate-500">Gateway Transaction ID</p>
                     <p className="font-mono text-sm text-slate-900 break-all">
-                      {payment.gateway_transaction_id || (
+                      {payment.gatewayTransactionId || (
                         <span className="text-slate-400 italic">Pending...</span>
                       )}
                     </p>
@@ -317,7 +317,7 @@ const PaymentDetails: React.FC = () => {
                   <div>
                     <p className="text-sm text-slate-500">Created At</p>
                     <p className="font-medium text-slate-900">
-                      {new Date(payment.created_at).toLocaleString('en-US', {
+                      {new Date(payment.createdAt).toLocaleString('en-US', {
                         dateStyle: 'medium',
                         timeStyle: 'short'
                       })}
@@ -332,7 +332,7 @@ const PaymentDetails: React.FC = () => {
                   <div>
                     <p className="text-sm text-slate-500">Last Updated</p>
                     <p className="font-medium text-slate-900">
-                      {new Date(payment.updated_at).toLocaleString('en-US', {
+                      {new Date(payment.updatedAt).toLocaleString('en-US', {
                         dateStyle: 'medium',
                         timeStyle: 'short'
                       })}
@@ -347,7 +347,7 @@ const PaymentDetails: React.FC = () => {
                   <div>
                     <p className="text-sm text-slate-500">Idempotency Key</p>
                     <p className="font-mono text-xs text-slate-900 break-all">
-                      {payment.idempotency_key}
+                      {payment.idempotencyKey}
                     </p>
                   </div>
                 </div>
