@@ -113,6 +113,17 @@ const CreatePayment: React.FC = () => {
       } else if (error.statusCode === 409) {
         showToast('Idempotency conflict: Payment with this data already exists', 'info');
         setIsDuplicate(true);
+      } else if (error.statusCode === 422) {
+        // Duplicate order - order already has a successful/processing payment
+        showToast('This order has already been paid', 'error');
+        setIsDuplicate(true);
+        setResponseDebug({
+          error: 'Duplicate Order',
+          message: error.message || 'This order has already been paid',
+          existingPaymentId: error.existingPaymentId,
+          existingStatus: error.existingStatus,
+          status: 'failed'
+        });
       } else if (error.statusCode === 500) {
         showToast('Internal Server Error: Please try again later', 'error');
       } else {

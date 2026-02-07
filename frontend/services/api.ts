@@ -59,7 +59,13 @@ async function fetchWithRetry<T>(url: string, options: RequestOptions = {}, retr
       // Don't retry client errors (4xx) except 429 or 408
       if (response.status >= 400 && response.status < 500 && response.status !== 429 && response.status !== 408) {
          const errorData = await response.json().catch(() => ({ message: 'Unknown Error' }));
-         throw { message: errorData.message || response.statusText, statusCode: response.status } as ApiError;
+         throw { 
+           message: errorData.message || response.statusText, 
+           statusCode: response.status,
+           existingPaymentId: errorData.existingPaymentId,
+           existingStatus: errorData.existingStatus,
+           error: errorData.error
+         } as ApiError;
       }
       throw { message: response.statusText, statusCode: response.status };
     }

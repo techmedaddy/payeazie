@@ -36,6 +36,16 @@ class IdempotencyConflictError extends Error {
     }
 }
 
+class DuplicateOrderError extends Error {
+    constructor(existingPaymentId, existingStatus) {
+        super('Order has already been paid');
+        this.name = 'DuplicateOrderError';
+        this.statusCode = 422;
+        this.existingPaymentId = existingPaymentId;
+        this.existingStatus = existingStatus;
+    }
+}
+
 const assertPayload = ({ orderId, idempotencyKey, amount, currency }) => {
     if (!orderId) throw new Error('orderId is required');
     if (!idempotencyKey) throw new Error('idempotencyKey is required');
@@ -92,9 +102,8 @@ class IdempotencyService {
                     existingIdempotencyKey: existingPaidOrder.idempotency_key
                 }, 'idempotency.createOrRetrieve.orderAlreadyPaid');
                 
-                // Return the existing successful payment (idempotent behavior)
-                const fullPayment = await db.one('SELECT * FROM payments WHERE id = $1', [existingPaidOrder.id]);
-                return normalizePayment(fullPayment);
+                // Throw error so frontend can handle duplicate order properly
+                throw new DuplicateOrderError(existingPaidOrder.id, existingPaidOrder.status);
             }
 
             const { payment, created } = await db.tx(async (t) => {
@@ -160,7 +169,8 @@ const idempotencyService = {
     resolve: (orderId, idempotencyKey, amount, currency, userId = null) =>
         IdempotencyService.createOrRetrieve({ orderId, idempotencyKey, amount, currency, userId }),
     IdempotencyConflictError,
-    IdempotencyMismatchError: IdempotencyConflictError
+    IdempotencyMismatchError: IdempotencyConflictError,
+    DuplicateOrderError
 };
 
 module.exports = idempotencyService;

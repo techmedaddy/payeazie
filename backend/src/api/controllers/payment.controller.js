@@ -120,6 +120,16 @@ const createPaymentIntent = async (req, reply) => {
             return sendResponse(reply, 409, { error: err.message });
         }
         
+        // Return specific error for duplicate order attempts
+        if (err.name === 'DuplicateOrderError') {
+            return sendResponse(reply, 422, { 
+                error: 'Duplicate order', 
+                message: err.message,
+                existingPaymentId: err.existingPaymentId,
+                existingStatus: err.existingStatus
+            });
+        }
+        
         return sendResponse(reply, 500, { error: 'Unable to create payment intent', details: err.message });
     }
 };
@@ -372,6 +382,16 @@ const createPayment = async (req, reply) => {
             return sendResponse(reply, 409, { 
                 error: 'Idempotency conflict',
                 details: err.message 
+            });
+        }
+        
+        // Return specific error for duplicate order attempts
+        if (err.name === 'DuplicateOrderError') {
+            return sendResponse(reply, 422, { 
+                error: 'Duplicate order',
+                message: err.message,
+                existingPaymentId: err.existingPaymentId,
+                existingStatus: err.existingStatus
             });
         }
         
