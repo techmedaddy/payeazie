@@ -20,6 +20,14 @@ const UPSERT_PAYMENT_INTENT = `
     LIMIT 1;
 `;
 
+// Check if order already has a successful/processing payment (prevents duplicate charges)
+const CHECK_ORDER_ALREADY_PAID = `
+    SELECT id, status, idempotency_key, amount, currency
+    FROM payments 
+    WHERE order_id = $1 AND status IN ('succeeded', 'processing')
+    LIMIT 1
+`;
+
 class IdempotencyConflictError extends Error {
     constructor(message = 'Idempotent payload mismatch') {
         super(message);
@@ -70,6 +78,24 @@ class IdempotencyService {
             assertPayload({ orderId, idempotencyKey, amount, currency });
 
             logger.debug({ orderId, idempotencyKey, amount, currency, userId }, 'idempotency.createOrRetrieve.start');
+
+            // Check if this order already has a successful/processing payment
+            // This prevents duplicate charges even with different idempotency keys
+            const existingPaidOrder = await db.oneOrNone(CHECK_ORDER_ALREADY_PAID, [orderId]);
+            
+            if (existingPaidOrder) {
+                logger.info({ 
+                    orderId, 
+                    existingPaymentId: existingPaidOrder.id,
+                    existingStatus: existingPaidOrder.status,
+                    requestedIdempotencyKey: idempotencyKey,
+                    existingIdempotencyKey: existingPaidOrder.idempotency_key
+                }, 'idempotency.createOrRetrieve.orderAlreadyPaid');
+                
+                // Return the existing successful payment (idempotent behavior)
+                const fullPayment = await db.one('SELECT * FROM payments WHERE id = $1', [existingPaidOrder.id]);
+                return normalizePayment(fullPayment);
+            }
 
             const { payment, created } = await db.tx(async (t) => {
                 logger.debug('idempotency.createOrRetrieve.db.transaction.start');
