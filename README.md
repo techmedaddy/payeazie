@@ -4,6 +4,9 @@ A production-grade payment processing system demonstrating modern full-stack arc
 
 **Built with:** Node.js + Express + TypeScript | React + Vite | PostgreSQL + Supabase | Redis + BullMQ | Render Deployment
 
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/1860dc21-d1ff-4919-8104-77913bbb7184" />
+
+
 ---
 
 ## 🏗️ High-Level Architecture
@@ -49,6 +52,7 @@ graph TB
 
 ---
 
+
 ## 📊 Payment Lifecycle & Data Flow
 
 ```mermaid
@@ -85,6 +89,8 @@ sequenceDiagram
     API-->>FE: [{transitionType, from, to, timestamp, ...}]
     FE->>FE: Display lifecycle breadcrumb
 ```
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/afab7256-64b9-4cd6-96f7-f29c804fbf45" />
+
 
 **Payment States:**
 | State | Trigger | Worker Action |
@@ -214,6 +220,9 @@ Frontend Components:
 
 ---
 
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/ae9fde65-3190-4a4b-9a95-7f3ef1631572" />
+
+
 ## 🚀 CI/CD Pipeline & Deployment
 
 ```
@@ -259,6 +268,8 @@ GitHub Push (main)
 5. **Health Check:** POST-deploy endpoint validation
 
 ---
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/03e6b44f-4476-43cf-b116-2c2104affb8f" />
+
 
 ## 📦 Deployment Architecture (Render + Supabase)
 
@@ -492,6 +503,9 @@ payeazie/
 ├── SYSTEM_PROMPT.md                  (Copilot/AI guidelines)
 └── package.json                      (Root workspace config)
 ```
+
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/78196ea5-4d6c-4369-94b4-dbbf70c59708" />
+
 
 **Key Directories:**
 - `backend/src/core/orchestrator/` – Payment processing orchestration
