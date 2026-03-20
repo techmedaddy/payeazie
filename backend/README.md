@@ -1,518 +1,148 @@
-# PayEazie Backend
+# Payeazie Backend
 
-Production-ready payment processing system built with Node.js, Fastify, PostgreSQL, and Redis.
+Fastify API for the Payeazie payment orchestration demo.
 
-## 🚀 Features
+This service handles authentication, payment creation, audit logging, background job scheduling, worker startup, and health/metrics endpoints. Payments are persisted in PostgreSQL and processed asynchronously through Redis-backed BullMQ queues.
 
-- ✅ RESTful payment API with idempotency
-- ✅ Asynchronous worker-based processing (BullMQ)
-- ✅ Automatic payment reconciliation
-- ✅ Real-time status updates
-- ✅ Graceful shutdown handling
-- ✅ Comprehensive health checks
-- ✅ Metrics and observability
-- ✅ Structured logging
-- ✅ Production-ready configuration
+## Stack
 
-## 📋 Prerequisites
+- Node.js
+- Fastify
+- PostgreSQL with `pg-promise`
+- Redis with BullMQ
+- JWT authentication
+- Passport Google OAuth
+- Pino logging
 
-- Node.js 18+ 
-- PostgreSQL 12+
-- Redis 6+
+## Responsibilities
 
-## 🏁 Quick Start
+- Register and log in users
+- Validate JWTs for protected routes
+- Create payments with idempotency support
+- Queue payment charge jobs
+- Start charge and reconciliation workers
+- Track payment status transitions and audit logs
+- Expose health and metrics endpoints
 
-### 1. Install Dependencies
+## Run Locally
 
 ```bash
 npm install
-```
-
-### 2. Setup Environment
-
-```bash
 cp .env.example .env
-# Edit .env with your configuration
-```
-
-Required environment variables:
-
-```bash
-NODE_ENV=development
-PORT=3000
-DATABASE_URL=postgresql://localhost:5432/payeazie
-REDIS_URL=redis://localhost:6379
-LOG_LEVEL=info
-```
-
-### 3. Initialize Database
-
-```bash
-# Run migrations
-npm run migrate
-
-# Or initialize from scratch
-npm run init-db
-```
-
-### 4. Start Server
-
-```bash
 npm start
 ```
 
-The server will start on `http://localhost:3000`
-
-### 5. Verify System
+Default local port:
 
 ```bash
-# Check health
-curl http://localhost:3000/health
-
-# Run full system verification
-./scripts/verify-system.sh
+3467
 ```
 
-## 🏗️ Architecture
-
-```
-┌─────────────┐
-│   Client    │
-└──────┬──────┘
-       │
-       ▼
-┌─────────────────┐     ┌──────────────┐
-│   API Server    │────▶│  PostgreSQL  │
-│   (Fastify)     │     │  (Payments)  │
-└────────┬────────┘     └──────────────┘
-         │
-         ▼
-┌─────────────────┐     ┌──────────────┐
-│  Redis/BullMQ   │◀────│   Workers    │
-│   (Job Queue)   │     │ - Charge     │
-└─────────────────┘     │ - Reconcile  │
-                        └──────────────┘
-```
-
-### Components
-
-- **API Server**: Fastify-based REST API
-- **Workers**: Background job processors
-  - **Charge Worker**: Processes payment gateway charges
-  - **Reconcile Worker**: Reconciles payment statuses (every 5 minutes)
-- **PostgreSQL**: Payment data persistence
-- **Redis**: Job queue management (BullMQ)
-
-## 📡 API Endpoints
-
-### Create Payment Intent
+Minimum environment variables:
 
 ```bash
-POST /api/payments/intents
-Headers:
-  Idempotency-Key: unique-key-123
-Body:
-  {
-    "orderId": "ORD-123",
-    "amount": 1000,
-    "currency": "USD"
-  }
-
-Response: 202 Accepted
-  {
-    "id": "abc-123",
-    "orderId": "ORD-123",
-    "amount": 1000,
-    "currency": "USD",
-    "status": "processing",
-    "createdAt": "2024-01-15T10:30:00Z"
-  }
+DATABASE_URL=postgresql://user:password@localhost:5432/payeazie
+REDIS_URL=redis://localhost:6379
+JWT_SECRET=change-me
+PORT=3467
+NODE_ENV=development
 ```
 
-### Get Payment Status
+Optional integrations:
+
+- Google OAuth via `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_CALLBACK_URL`
+- Password reset email via SMTP variables
+
+## Available Scripts
 
 ```bash
-GET /api/payments/:paymentId
-
-Response: 200 OK
-  {
-    "id": "abc-123",
-    "orderId": "ORD-123",
-    "status": "succeeded",
-    "gatewayChargeId": "ch_abc123",
-    "updatedAt": "2024-01-15T10:30:05Z"
-  }
+npm start
+npm test
+npm run test:watch
+npm run test:coverage
+npm run db:init
+npm run db:migrate
+npm run db:setup
 ```
 
-### Health Check
+There are also several shell and JS verification scripts in `scripts/` and the backend root for manual testing and demos.
 
-```bash
-GET /health
+## Startup Behavior
 
-Response: 200 OK
-  {
-    "status": "ok",
-    "database": "connected",
-    "redis": "connected",
-    "uptime": 3600
-  }
-```
+On startup the backend:
 
-### Metrics
+1. Loads environment variables
+2. Runs SQL migrations from `backend/migrations`
+3. Verifies PostgreSQL and Redis connectivity
+4. Starts BullMQ workers
+5. Starts the Fastify server
+6. Schedules periodic reconciliation jobs
 
-```bash
-GET /metrics/summary
+## Key Routes
 
-Response: 200 OK
-  {
-    "payments": { "total": 1234, "successRate": "92.50%" },
-    "workers": { ... },
-    "gateway": { ... }
-  }
-```
+Health and metrics:
 
-## 🔧 Configuration
+- `GET /`
+- `GET /health`
+- `GET /health/detailed`
+- `GET /metrics`
+- `GET /metrics/summary`
 
-All configuration via environment variables. See [src/utils/config.js](./src/utils/config.js).
+Auth:
 
-### Core Settings
+- `POST /api/auth/register`
+- `POST /api/auth/login`
+- `GET /api/auth/me`
+- `POST /api/auth/forgot-password`
+- `POST /api/auth/reset-password`
+- `GET /api/auth/google`
+- `GET /api/auth/google/callback`
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `NODE_ENV` | `development` | Environment mode |
-| `PORT` | `3000` | Server port |
-| `DATABASE_URL` | Required | PostgreSQL connection |
-| `REDIS_URL` | Required | Redis connection |
-| `LOG_LEVEL` | `info` | Logging verbosity |
+Payments:
 
-### Worker Settings
+- `GET /api/payments`
+- `GET /api/payments/:paymentId`
+- `POST /api/payments`
+- `POST /api/payments/intents`
+- `GET /api/payments/:paymentId/audit`
+- `GET /api/payments/:paymentId/stream`
+- `POST /api/payments/reconcile`
+- `POST /api/payments/webhook`
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `ENABLE_WORKERS` | `true` | Start background workers |
-| `WORKER_CONCURRENCY` | `5` | Concurrent jobs per worker |
-| `RECONCILE_CRON` | `*/5 * * * *` | Reconciliation schedule |
+Audit:
 
-### Metrics Settings
+- `GET /api/audit-logs`
+- `GET /api/audit-logs/:paymentId`
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `ENABLE_METRICS` | `false` | Periodic metrics logging |
-| `METRICS_LOG_INTERVAL` | `60000` | Metrics log interval (ms) |
+## Core Backend Modules
 
-## 🎭 Demo & Verification
+- `src/api/` route handlers, controllers, and middleware
+- `src/core/idempotency/` payment creation and duplicate request handling
+- `src/core/status-transition/` transition validation, audit logging, pub/sub events
+- `src/workers/` charge and reconciliation workers
+- `src/utils/queue.js` BullMQ queue and worker helpers
+- `src/db/` database bootstrap and model helpers
 
-### Quick Demo Setup
+## Data Model Overview
 
-Seed the database with sample payments for demos:
+Main tables created by migrations:
 
-```bash
-# Seed demo payments (succeeded, failed, processing)
-node scripts/seed-payments.js
-```
+- `payments`
+- `payment_audit_log`
+- `events`
+- `users`
+- `password_resets`
 
-This creates 8 demo payments with various statuses:
-- 3 succeeded payments
-- 2 failed payments
-- 2 processing payments (potentially stuck)
-- 1 pending payment
+Payment lifecycle statuses used by the app:
 
-### Find Stuck Payments
+- `pending`
+- `processing`
+- `succeeded`
+- `failed`
+- `refunded`
 
-Check for payments that are stuck in processing state:
+## Notes
 
-```bash
-# Find payments stuck in processing for > 5 minutes
-node scripts/find-stuck.js
-```
-
-This script:
-- Identifies stuck payments
-- Shows payment details and time stuck
-- Provides recommended troubleshooting actions
-- Displays overall payment status summary
-
-### Restart & Verify System
-
-Stop and restart the backend with full health verification:
-
-```bash
-# Restart backend and verify workers
-./scripts/restart-and-verify.sh
-```
-
-This script:
-- Stops existing backend processes
-- Starts fresh backend server
-- Waits for server readiness
-- Checks `/health` endpoint
-- Creates a test payment
-- Monitors worker processing
-- Verifies final payment status
-
-## 🧪 Testing
-
-### Manual Testing
-
-```bash
-# Test payment API
-./scripts/test-payment-api.sh
-
-# Test worker flow
-./scripts/test-worker-flow.sh
-
-# Verify entire system
-./scripts/verify-system.sh
-
-# Monitor metrics
-./scripts/monitor-dashboard.sh
-```
-
-### Automated Testing
-
-See [TESTING_GUIDE.md](./TESTING_GUIDE.md) for comprehensive testing strategies including:
-- Unit tests
-- Integration tests
-- E2E tests
-- Load testing
-
-## 📊 Monitoring
-
-### Built-in Observability
-
-- **Health Check**: `/health`
-- **Metrics**: `/metrics` and `/metrics/summary`
-- **Structured Logs**: JSON format in production
-- **Request Tracing**: Correlation IDs
-
-### Log Output
-
-Development (pretty):
-```
-[10:30:00] INFO: Payment created { paymentId: 'abc-123', status: 'processing' }
-```
-
-Production (JSON):
-```json
-{
-  "level": "INFO",
-  "time": "2024-01-15T10:30:00.000Z",
-  "msg": "Payment created",
-  "paymentId": "abc-123",
-  "status": "processing"
-}
-```
-
-## 🚢 Deployment
-
-### Production Deployment
-
-See [PRODUCTION_DEPLOYMENT.md](./PRODUCTION_DEPLOYMENT.md) for detailed deployment guides for:
-
-- Railway
-- Render
-- Fly.io
-- AWS ECS/Fargate
-- Docker
-- Kubernetes
-
-### Quick Deploy (Railway)
-
-```bash
-railway login
-railway init
-railway add postgresql
-railway add redis
-railway up
-```
-
-### Quick Deploy (Docker)
-
-```bash
-docker build -t payeazie-backend .
-docker run -p 3000:3000 \
-  -e DATABASE_URL=$DATABASE_URL \
-  -e REDIS_URL=$REDIS_URL \
-  payeazie-backend
-```
-
-## 📚 Documentation
-
-- **[API Flow](./API_FLOW.md)** - Detailed API request/response flows
-- **[Worker Flow](./WORKER_FLOW.md)** - Background processing architecture
-- **[Production Deployment](./PRODUCTION_DEPLOYMENT.md)** - Cloud deployment guides
-- **[Production Readiness](./PRODUCTION_READINESS_SUMMARY.md)** - Production checklist
-- **[Testing Guide](./TESTING_GUIDE.md)** - Testing strategies
-- **[Error Fix Summary](./ERROR_FIX_SUMMARY.md)** - Issue resolution history
-- **[Verification Checklist](./VERIFICATION_CHECKLIST.md)** - System validation
-
-## 🔒 Security
-
-### Implemented
-
-- ✅ Parameterized SQL queries (SQL injection prevention)
-- ✅ Environment variable security (no secrets in code)
-- ✅ Input validation
-- ✅ CORS configuration
-- ✅ Graceful error handling (no stack traces to clients)
-- ✅ Database connection encryption
-
-### Recommended Additions
-
-- [ ] Rate limiting
-- [ ] API authentication
-- [ ] Request size limits
-- [ ] Security headers (Helmet)
-- [ ] Audit logging
-
-## 🛠️ Development
-
-### Project Structure
-
-```
-backend/
-├── server.js                 # Main application entry
-├── package.json             # Dependencies
-├── src/
-│   ├── api/
-│   │   ├── controllers/     # Request handlers
-│   │   └── routes/          # Route definitions
-│   ├── core/
-│   │   ├── idempotency/     # Idempotency service
-│   │   └── orchestrator/    # Payment orchestration
-│   ├── db/
-│   │   ├── config/          # Database configuration
-│   │   └── models/          # Data models
-│   ├── utils/
-│   │   ├── config.js        # Configuration management
-│   │   ├── logger.js        # Structured logging
-│   │   ├── metrics.js       # Metrics collection
-│   │   ├── queue.js         # BullMQ queue client
-│   │   └── gateway-client.js # Gateway simulation
-│   └── workers/
-│       ├── charge.worker.js      # Charge processing
-│       └── reconcile.worker.js   # Status reconciliation
-├── scripts/
-│   ├── verify-system.sh     # System verification
-│   ├── test-payment-api.sh  # API testing
-│   └── monitor-dashboard.sh # Metrics monitoring
-└── migrations/
-    └── 001_alter_order_id_to_text.sql
-```
-
-### Adding a New Feature
-
-1. **Create Controller**: Add handler in `src/api/controllers/`
-2. **Add Route**: Register route in `src/api/routes/`
-3. **Update Database**: Add migration if needed
-4. **Add Tests**: Write tests in `__tests__/`
-5. **Document**: Update relevant documentation
-6. **Test**: Run `./scripts/verify-system.sh`
-
-### Code Style
-
-```bash
-# Lint code
-npm run lint
-
-# Format code
-npm run format
-```
-
-## 🐛 Troubleshooting
-
-### Workers Not Starting
-
-```bash
-# Check Redis connection
-redis-cli -u $REDIS_URL ping
-
-# Verify ENABLE_WORKERS is true
-echo $ENABLE_WORKERS
-
-# Check logs for worker errors
-grep "worker" logs/app.log
-```
-
-### Database Connection Issues
-
-```bash
-# Test database connection
-psql $DATABASE_URL -c "SELECT 1"
-
-# Check connection pool
-curl http://localhost:3000/health
-```
-
-### High Memory Usage
-
-- Reduce `DB_POOL_MAX` connection limit
-- Reduce `WORKER_CONCURRENCY` setting
-- Check for memory leaks in logs
-
-See [PRODUCTION_DEPLOYMENT.md](./PRODUCTION_DEPLOYMENT.md#troubleshooting) for more troubleshooting tips.
-
-## 📈 Performance
-
-### Benchmarks
-
-**Single Instance**:
-- ~50 requests/second
-- ~100 payments/minute
-- ~100-150MB memory usage
-
-**Production (3 instances)**:
-- ~150-200 requests/second
-- ~500-1000 payments/minute
-
-### Optimization Tips
-
-- Enable connection pooling
-- Scale horizontally (multiple instances)
-- Use read replicas for heavy reads
-- Enable Redis persistence
-- Monitor slow queries
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit changes (`git commit -m 'Add amazing feature'`)
-4. Push to branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## 📝 License
-
-This project is licensed under the MIT License.
-
-## 🙋 Support
-
-- **Documentation**: See `/docs` folder
-- **Issues**: Open a GitHub issue
-- **Questions**: Contact the development team
-
-## 🎯 Roadmap
-
-### v1.1 (Q2 2024)
-- [ ] Real payment gateway integration (Stripe/Square)
-- [ ] API authentication and authorization
-- [ ] Rate limiting
-- [ ] Prometheus metrics export
-
-### v1.2 (Q3 2024)
-- [ ] Webhook support for gateway events
-- [ ] Refund functionality
-- [ ] Multi-currency support
-- [ ] Advanced reporting
-
-### v2.0 (Q4 2024)
-- [ ] GraphQL API
-- [ ] Microservices architecture
-- [ ] Event sourcing
-- [ ] CQRS pattern
-
----
-
-**Built with ❤️ by the PayEazie Team**
-
-For questions or support, check the [documentation](./PRODUCTION_READINESS_SUMMARY.md) or open an issue.
+- The gateway client is mocked for demo purposes.
+- The frontend currently polls payment status, while the backend also exposes an SSE endpoint.
+- This backend is written in CommonJS JavaScript.
