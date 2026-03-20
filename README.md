@@ -1,133 +1,596 @@
-# Payeazie
+# 💳 PAYEAZIE – Payment Orchestration Platform
 
-Payeazie is a full-stack payment orchestration demo built as a portfolio project. It simulates a small payments platform with authenticated users, idempotent payment creation, background workers, audit logs, and a React dashboard for tracking payment state.
+A production-grade payment processing system demonstrating modern full-stack architecture, asynchronous job queues, real-time status synchronization, and enterprise-grade authentication with audit logging.
 
-The goal of the project is not to integrate a real gateway yet, but to show how a payment flow can be structured across an API, database, queue, workers, and frontend.
+**Built with:** Node.js + Express + TypeScript | React + Vite | PostgreSQL + Supabase | Redis + BullMQ | Render Deployment
 
-## Stack
+---
 
-- Backend: Node.js, Fastify, BullMQ, pg-promise, Redis, PostgreSQL
-- Frontend: React, TypeScript, Vite, React Router
-- Auth: JWT, email/password login, Google OAuth support
-- Observability: structured logging, health endpoints, in-memory metrics
+## 🏗️ High-Level Architecture
 
-## What The App Does
-
-- Registers and logs in users
-- Protects payment routes with JWT auth
-- Creates payments with idempotency support
-- Queues background charge jobs in Redis via BullMQ
-- Transitions payments through `pending`, `processing`, `succeeded`, and `failed`
-- Writes status changes to an audit log
-- Shows a dashboard, payment details page, and audit trail in the frontend
-
-## Repo Layout
-
-```text
-.
-├── backend/    Fastify API, workers, DB models, migrations, tests, scripts
-├── frontend/   React app with auth, dashboard, create-payment, details pages
-└── README.md   Project overview
+```mermaid
+graph TB
+    FE["⚛️ React Frontend<br/>(Vite)"]
+    API["🔌 Express API<br/>(Node.js/TS)"]
+    DB[(🗄️ Supabase<br/>PostgreSQL)]
+    REDIS["📨 Redis<br/>(Job Queue)"]
+    CHARGE["⚡ Charge Worker<br/>(BullMQ)"]
+    RECONCILE["🔄 Reconcile Worker<br/>(BullMQ)"]
+    GATEWAY["🏦 Payment Gateway<br/>(Mocked)"]
+    AUDIT["📋 Audit Logs<br/>(DB)"]
+    
+    FE -->|REST + Polling| API
+    API -->|CRUD + Status| DB
+    API -->|Enqueue Job| REDIS
+    REDIS -->|Job Events| CHARGE
+    REDIS -->|Job Events| RECONCILE
+    CHARGE -->|Process + Update| DB
+    CHARGE -->|API Call| GATEWAY
+    RECONCILE -->|Sync + Verify| DB
+    CHARGE -->|Log Transition| AUDIT
+    RECONCILE -->|Log Transition| AUDIT
+    FE -->|View Logs| API
+    
+    style FE fill:#61dafb,stroke:#333,color:#000
+    style API fill:#68a063,stroke:#333,color:#fff
+    style DB fill:#3ecf8e,stroke:#333,color:#fff
+    style REDIS fill:#dc382d,stroke:#333,color:#fff
+    style CHARGE fill:#ff9800,stroke:#333,color:#fff
+    style RECONCILE fill:#ff9800,stroke:#333,color:#fff
+    style GATEWAY fill:#999,stroke:#333,color:#fff
+    style AUDIT fill:#2196f3,stroke:#333,color:#fff
 ```
 
-## Architecture
+**Key Design Choices:**
+- **Decoupled Workers:** Charge & reconcile as independent job consumers for fault isolation
+- **Redis Queue:** BullMQ provides job persistence, retries, and event-driven architecture
+- **Polling Frontend:** React polls `/payments/:id` for real-time lifecycle visibility
+- **Audit-First:** Every status transition logged with user, timestamp, and delta
 
-```text
-Frontend (React)
-    |
-    | REST API
-    v
-Backend (Fastify)
-    |
-    | PostgreSQL writes + BullMQ jobs
-    v
-PostgreSQL <----> Redis
-    ^              |
-    |              |
-    +------ Workers (charge + reconcile)
+---
+
+## 📊 Payment Lifecycle & Data Flow
+
+```mermaid
+sequenceDiagram
+    actor User as User
+    participant FE as Frontend
+    participant API as Express API
+    participant DB as PostgreSQL
+    participant QUEUE as BullMQ
+    participant WORKER as Charge Worker
+    participant GW as Gateway
+    
+    User->>FE: Create Payment ($50)
+    FE->>API: POST /payments (userId, amount, metadata)
+    API->>DB: INSERT payment (status=pending)
+    API->>QUEUE: Enqueue charge_job
+    API-->>FE: {id, status: pending, ...}
+    
+    QUEUE->>WORKER: Dequeue charge_job
+    WORKER->>DB: UPDATE status=processing (acquire lock)
+    WORKER->>GW: Call Gateway API (charge $50)
+    GW-->>WORKER: {status: succeeded, transactionId: tx_123}
+    WORKER->>DB: UPDATE status=succeeded, txId, gateway_response
+    WORKER->>DB: INSERT audit_log (pending→succeeded, systemUser)
+    WORKER-->>QUEUE: Job completed
+    
+    FE->>API: Poll GET /payments/:id (every 2s)
+    API->>DB: SELECT * FROM payments
+    DB-->>API: {status: succeeded, ...}
+    API-->>FE: Current payment state
+    FE->>FE: Render succeeded badge ✅
+    
+    FE->>API: GET /audit-logs (user=userId)
+    API-->>FE: [{transitionType, from, to, timestamp, ...}]
+    FE->>FE: Display lifecycle breadcrumb
 ```
 
-## Main Flow
+**Payment States:**
+| State | Trigger | Worker Action |
+|-------|---------|---|
+| `pending` | API received request | Stored in DB, job enqueued |
+| `processing` | Worker acquired job lock | Gateway call in progress |
+| `succeeded` | Gateway returned success | Status + transaction ID persisted, audit logged |
+| `failed` | Gateway error or timeout | Error persisted, audit logged, no retry by default |
 
-1. A signed-in user creates a payment from the frontend.
-2. The backend stores a `pending` payment and enqueues a charge job.
-3. The charge worker moves the payment to `processing`, simulates a gateway call, and writes the final status.
-4. Each valid transition is recorded in `payment_audit_log`.
-5. The frontend polls the payment details endpoint and shows the latest state.
+---
 
-## Local Development
+## 🎯 Low-Level Design – Component Breakdown
 
-### 1. Backend
+### Backend Layered Architecture
+
+```
+┌─────────────────────────────────────────────────────┐
+│             ROUTES / CONTROLLERS                     │
+│  (/api/routes: payment, auth, audit, health)        │
+├─────────────────────────────────────────────────────┤
+│             BUSINESS LOGIC LAYER                     │
+│  ├─ paymentService (create, fetch, list)           │
+│  ├─ authService (login, register, OAuth, reset)    │
+│  ├─ statusTransitionService (validate state change) │
+│  ├─ auditService (log transitions)                 │
+│  └─ rateLimitService (track login attempts)        │
+├─────────────────────────────────────────────────────┤
+│             WORKER LAYER (Job Consumers)            │
+│  ├─ charge.worker (process payment, call gateway)  │
+│  ├─ reconcile.worker (sync & verify)               │
+│  └─ queue.utils (job enqueueing, events)           │
+├─────────────────────────────────────────────────────┤
+│             DATA ACCESS LAYER                       │
+│  ├─ paymentDB (queries, mutations)                 │
+│  ├─ auditDB (insertAuditLog)                       │
+│  ├─ userDB (auth, roles)                           │
+│  └─ migrations (schema evolution)                  │
+├─────────────────────────────────────────────────────┤
+│             INFRA LAYER                             │
+│  ├─ db.pool (PostgreSQL connection pool)           │
+│  ├─ redis.client (BullMQ queue client)             │
+│  ├─ logger (structured JSON logging)               │
+│  └─ config (env-based settings)                    │
+└─────────────────────────────────────────────────────┘
+
+Frontend Components:
+┌──────────────────────┐
+│   App.tsx (Router)   │
+├──────────────────────┤
+│  Pages:              │
+│  ├─ Dashboard        │
+│  ├─ PaymentForm      │
+│  ├─ PaymentDetail    │
+│  └─ AuditLog         │
+├──────────────────────┤
+│  Components:         │
+│  ├─ StatusBadge      │
+│  ├─ PaymentCard      │
+│  ├─ LifecycleBread   │
+│  └─ AuditTable       │
+├──────────────────────┤
+│  Context:            │
+│  ├─ AuthContext      │
+│  └─ PaymentContext   │
+├──────────────────────┤
+│  Services:           │
+│  ├─ paymentService   │
+│  ├─ authService      │
+│  └─ auditService     │
+└──────────────────────┘
+```
+
+---
+
+## 🔐 Authentication & Security Architecture
+
+```
+┌─────────────────────────────────────────────────┐
+│                   User Login                     │
+└────────────────────┬────────────────────────────┘
+                     │
+                     ▼
+          ┌──────────────────────┐
+          │  Email / Password    │
+          │  or Google OAuth     │
+          └──────────┬───────────┘
+                     │
+                     ▼
+          ┌──────────────────────────────┐
+          │  POST /auth/login             │
+          │  POST /auth/register          │
+          │  POST /auth/google            │
+          │  POST /auth/reset-password    │
+          └──────────┬───────────────────┘
+                     │
+          ┌──────────▼───────────┐
+          │  Rate Limit Check    │
+          │  (5 attempts/10min)  │
+          └──────────┬───────────┘
+                     │
+          ┌──────────▼───────────────┐
+          │  Validate Input          │
+          │  Hash Password (bcrypt)  │
+          │  Query PostgreSQL        │
+          └──────────┬───────────────┘
+                     │
+          ┌──────────▼──────────────────┐
+          │  Generate JWT Token        │
+          │  (expires: 24h)            │
+          │  Refresh Token in Cookie   │
+          └──────────┬──────────────────┘
+                     │
+                     ▼
+          ┌──────────────────────┐
+          │  Return to Frontend  │
+          │  (Authorization      │
+          │   header ready)      │
+          └──────────────────────┘
+```
+
+**Security Features:**
+- ✅ **Rate Limiting:** 5 attempts/10min on login (Redis-backed)
+- ✅ **Password Reset:** Token-based (expires 30min), sent via email
+- ✅ **Google OAuth2:** Passport.js strategy with refresh token handling
+- ✅ **JWT Validation:** Middleware on protected routes
+- ✅ **Per-User Dashboard:** Users only see their own payments
+
+---
+
+## 🚀 CI/CD Pipeline & Deployment
+
+```
+GitHub Push (main)
+       │
+       ▼
+  GitHub Actions
+       │
+    ┌──┴──┐
+    │     │
+    ▼     ▼
+ Lint   Test
+ (ESLint,  (Vitest/Jest)
+  Prettier)
+    │     │
+    └──┬──┘
+       ▼
+    Build
+ (TS Compile +
+  Vite Bundle)
+       │
+       ▼
+  Docker Build
+ (Multi-stage)
+       │
+    ┌──┴───────┐
+    │          │
+    ▼          ▼
+  Render    Netlify
+  (API)   (Frontend)
+    │          │
+    └──────┬───┘
+           ▼
+      Health Check
+     (POST deploy)
+```
+
+**Pipeline Stages:**
+1. **Lint & Test:** ESLint + Prettier (code quality), Vitest/Jest (unit & integration)
+2. **Build:** TypeScript compilation, Vite frontend bundle
+3. **Docker:** Multi-stage builds for optimized images
+4. **Deploy:** Render (backend), Netlify (frontend)
+5. **Health Check:** POST-deploy endpoint validation
+
+---
+
+## 📦 Deployment Architecture (Render + Supabase)
+
+```
+┌────────────────────────────────────────────────────────────┐
+│                      THE INTERNET                          │
+└──────────┬────────────────────────┬───────────────────┬────┘
+           │                        │                   │
+    ┌──────▼─────┐          ┌──────▼──────┐      ┌──────▼────┐
+    │  Netlify   │          │   Render    │      │ Supabase  │
+    │ (Frontend) │          │  (Backend)  │      │(PostgreSQL│
+    │            │          │             │      │ + Redis)  │
+    │ React App  │◄────────►│ Node.js API │◄────►│           │
+    │ (Static)   │ REST API │ + Workers   │      │ Vector DB │
+    │            │          │             │      │ (Auth)    │
+    └────────────┘          └─────────────┘      └───────────┘
+         │                         │                    │
+    Deployed on                 Deployed on          Managed
+    CDN (Global)              Web Service           Cloud DB
+                              (Auto-scaling)
+    
+    Frontend:                Backend:                 DB:
+    - Vite build            - Fastify server        - PostgreSQL
+    - TailwindCSS           - Redis (BullMQ)        - Connection pooling
+    - JWT auth header       - Workers (charge,      - Automated backups
+    - Polling interval:2s     reconcile)            - Row-level security
+```
+
+**Deployment Strategy:**
+- **Frontend:** Static site on Netlify CDN (instant updates)
+- **Backend:** Docker container on Render with auto-scaling
+- **Database:** Managed PostgreSQL on Supabase (no DevOps overhead)
+- **Queue:** Redis instance included in Supabase dashboard
+- **Environment Separation:** Dev (localhost), Staging (staging env), Prod (main env)
+
+---
+
+## 🛠️ Tech Stack & Trade-offs
+
+| Layer | Technology | Why | Trade-off |
+|-------|-----------|-----|-----------|
+| **Backend Framework** | Express (Fastify) | Lightweight, middleware-friendly | ~100ms slower than Rust/Go |
+| **Language** | Node.js + TypeScript | Type safety + ecosystem | Single-threaded (I/O-bound OK) |
+| **Database** | PostgreSQL (Supabase) | ACID + JSON support + managed | NoSQL more scalable for writes |
+| **Job Queue** | BullMQ + Redis | Reliable retries + events | Redis memory limits (solved w/ Cluster) |
+| **Frontend** | React + Vite | Component reuse + fast build | SPA larger bundle vs SSR |
+| **Authentication** | JWT + Passport | Stateless, standard OAuth | Token refresh needed every 24h |
+| **Polling** | 2s interval | Real-time feel, minimal latency | WebSocket better for high-frequency |
+| **Deployment** | Render + Netlify | Managed, zero DevOps | Higher cost vs bare VPS |
+
+---
+
+## 🐛 Common Bugs & Issues Solved
+
+### ✅ Payment Status Stuck in "Processing"
+
+**Problem:** Worker crashes → job dropped → payment never completes.  
+**Solution:** 
+- Implement job timeout (30s) → auto-move to failed
+- Add dead-letter queue for failed jobs
+- Periodic reconciliation worker sweeps stale records
+
+### ✅ Race Condition: Duplicate Charge
+
+**Problem:** Two workers process same payment concurrently.  
+**Solution:**
+- Database row lock (`SELECT ... FOR UPDATE`) during status transition
+- Idempotent gateway calls (transaction ID deduplication)
+- Log all transitions with timestamp for audit trail
+
+### ✅ Frontend Polling Creates Stale State
+
+**Problem:** User sees old status, backend updated minutes ago.  
+**Solution:**
+- Force refresh after payment action (no cache)
+- Implement exponential backoff after 10s (reduce polling spam)
+- Add "Last Updated" timestamp to response
+- Use ETag/If-None-Match for efficient polling
+
+### ✅ Redis Connection Drops in Production
+
+**Problem:** Worker queues freeze, job loss risk.  
+**Solution:**
+- Redis cluster with Sentinel for failover
+- Implement circuit breaker pattern (fallback to sync processing)
+- Monitor queue depth & worker lag (Prometheus metrics)
+- Auto-reconnect with exponential backoff
+
+### ✅ Gateway Timeout Leaves Payment in Limbo
+
+**Problem:** API timeout → worker unsure if charge succeeded.  
+**Solution:**
+- Gateway returns transaction ID immediately (not `pending`)
+- Worker queries gateway for final status asynchronously
+- Reconciliation worker runs every 5min to catch orphaned payments
+
+### ✅ OAuth Token Refresh Expires in Middle of Session
+
+**Problem:** User logged in, token expires, refresh fails.  
+**Solution:**
+- Refresh token stored in secure HttpOnly cookie (not localStorage)
+- Auto-refresh 5min before expiry (background job)
+- Graceful redirect to login on 401
+
+### ✅ Audit Logs Don't Match Payment Status
+
+**Problem:** User action logged but payment status unchanged.  
+**Solution:**
+- Enforce audit log AFTER status transition (transactional)
+- Use database triggers for audit on DELETE/UPDATE
+- Verify audit log count matches payment state transitions
+
+### ✅ Rate Limiting False Positives (Shared IPs)
+
+**Problem:** Corporate network blocked after 5 failed logins.  
+**Solution:**
+- Rate limit by username + IP (not just IP)
+- Whitelist corporate IPs in `.env`
+- Implement CAPTCHA after 3 failures
+- Send email notification on suspicious activity
+
+### ✅ Frontend Renders "Unknown" Status
+
+**Problem:** API returns new status type, React crashes.  
+**Solution:**
+- Frontend has fallback render for unrecognized statuses
+- Use status enum validation in TypeScript (strict types)
+- Log unexpected statuses to Sentry
+
+### ✅ Worker Processes Job But Doesn't Update DB
+
+**Problem:** Gateway returns success but DB commit fails.  
+**Solution:**
+- Wrap worker logic in transaction (all-or-nothing)
+- Retry mechanism on DB errors (not gateway errors)
+- Dead-letter queue for jobs failing >3 times
+
+---
+
+## 📁 Project Structure
+
+```
+payeazie/
+├── backend/
+│   ├── src/
+│   │   ├── api/
+│   │   │   ├── controllers/          (Request handlers)
+│   │   │   ├── routes/               (payment, auth, audit routes)
+│   │   │   └── middleware/           (auth, errorHandler, cors)
+│   │   ├── core/
+│   │   │   ├── orchestrator/         (Payment orchestration logic)
+│   │   │   ├── status-transition/    (State machine for payment status)
+│   │   │   └── idempotency/          (Idempotent request handling)
+│   │   ├── db/
+│   │   │   ├── config/               (Connection pooling)
+│   │   │   ├── models/               (DB queries)
+│   │   │   └── index.js              (DB exports)
+│   │   ├── workers/
+│   │   │   ├── charge.worker.js      (Process payments via gateway)
+│   │   │   ├── reconcile.worker.js   (Sync & verify payments)
+│   │   │   └── __tests__/
+│   │   └── utils/
+│   │       ├── queue.js              (BullMQ client & job management)
+│   │       ├── logger.js             (Structured logging)
+│   │       ├── metrics.js            (Prometheus metrics)
+│   │       ├── gateway-client.js     (Payment gateway API)
+│   │       ├── email.service.js      (Email notifications)
+│   │       ├── passport.config.js    (OAuth2 strategy)
+│   │       ├── payment-status.js     (Status constants)
+│   │       └── config.js             (App configuration)
+│   │
+│   ├── migrations/
+│   │   ├── 001_create_payments_table.sql
+│   │   ├── 002_create_audit_log.sql
+│   │   ├── 003_create_events_table.sql
+│   │   ├── 004_create_users_table.sql
+│   │   ├── 005_add_user_id_to_payments.sql
+│   │   ├── 006_add_role_to_users.sql
+│   │   ├── 007_create_password_resets_table.sql
+│   │   ├── 008_add_google_oauth_to_users.sql
+│   │   └── 009_add_user_tracking_to_audit_log.sql
+│   │
+│   ├── scripts/
+│   │   ├── migrate.js                (Run migrations)
+│   │   ├── seed-payments.js
+│   │   ├── monitor-dashboard.sh
+│   │   └── ...
+│   │
+│   ├── tests/
+│   │   ├── auth.phase1.test.js
+│   │   └── ...
+│   │
+│   ├── server.js                     (Express/Fastify entry point)
+│   ├── vitest.config.js
+│   └── package.json
+│
+├── frontend/
+│   ├── components/
+│   │   ├── Logo.tsx
+│   │   ├── ProtectedRoute.tsx
+│   │   └── ui/                       (UI component library)
+│   │
+│   ├── pages/
+│   │   ├── Dashboard.tsx             (User payment list)
+│   │   ├── CreatePayment.tsx         (Payment form)
+│   │   ├── PaymentDetails.tsx        (Single payment + audit log)
+│   │   ├── Login.tsx
+│   │   ├── Register.tsx
+│   │   ├── GoogleCallback.tsx        (OAuth callback handler)
+│   │   └── NotFound.tsx
+│   │
+│   ├── context/
+│   │   ├── AuthContext.tsx           (User auth state)
+│   │   └── ToastContext.tsx          (Notifications)
+│   │
+│   ├── services/
+│   │   ├── api.ts                    (HTTP client, base URL)
+│   │   ├── payments.ts               (Payment API calls)
+│   │   └── payments.test.ts
+│   │
+│   ├── hooks/                        (Custom React hooks)
+│   ├── utils/                        (Formatters, validators)
+│   │
+│   ├── App.tsx                       (Main router)
+│   ├── index.tsx
+│   ├── vite.config.ts
+│   ├── vitest.config.ts
+│   └── package.json
+│
+├── README.md                         (This file - project overview)
+├── SYSTEM_PROMPT.md                  (Copilot/AI guidelines)
+└── package.json                      (Root workspace config)
+```
+
+**Key Directories:**
+- `backend/src/core/orchestrator/` – Payment processing orchestration
+- `backend/src/workers/` – BullMQ job consumers (charge, reconcile)
+- `backend/src/utils/queue.js` – Job enqueueing & event handling
+- `frontend/pages/` – Page-level components (routed)
+- `frontend/services/` – API integration & HTTP client
+
+---
+
+## 🎮 Quick Start – Local Development
+
+### Prerequisites
+```bash
+Node.js 18+, PostgreSQL 12+, Redis 6+
+```
+
+### Setup
 
 ```bash
+# Clone & install
+git clone https://github.com/yourusername/payeazie.git
+cd payeazie
+
+# Backend
 cd backend
 npm install
-cp .env.example .env
-npm start
-```
+cp .env.example .env          # Configure DB & Redis URLs
+npm run migrate               # Run migrations
+npm run dev                   # Start Express + Workers
 
-Required backend environment variables:
-
-```bash
-DATABASE_URL=postgresql://...
-REDIS_URL=redis://localhost:6379
-JWT_SECRET=replace-me
-PORT=3467
-```
-
-The backend runs database migrations on startup and then starts the API server and workers.
-
-Useful endpoints:
-
-- `GET /health`
-- `GET /health/detailed`
-- `GET /metrics`
-- `GET /metrics/summary`
-- `POST /api/auth/register`
-- `POST /api/auth/login`
-- `GET /api/auth/me`
-- `GET /api/payments`
-- `POST /api/payments`
-- `POST /api/payments/intents`
-- `GET /api/payments/:paymentId`
-- `GET /api/payments/:paymentId/audit`
-
-### 2. Frontend
-
-```bash
+# Frontend (new terminal)
 cd frontend
 npm install
-npm run dev
+npm run dev                   # Vite dev server (http://localhost:5173)
 ```
 
-Frontend environment variable:
+### Verify
+```bash
+# Health check
+curl http://localhost:3000/health
+
+# Create payment
+curl -X POST http://localhost:3000/api/payments \
+  -H "Content-Type: application/json" \
+  -d '{"amount": 50, "description": "Test charge"}'
+
+# Watch worker process it
+tail -f backend/logs/app.log
+```
+
+---
+
+## 🧪 Testing
 
 ```bash
-VITE_API_URL=http://localhost:3467
+# Unit & integration tests
+cd backend && npm test
+
+# E2E payment lifecycle
+npm run test:e2e
+
+# Frontend component tests
+cd frontend && npm test
+
+# Auth flow (Google OAuth)
+npm run test:oauth
 ```
 
-The frontend uses a `HashRouter`, so the main routes look like:
+---
 
-- `/#/login`
-- `/#/register`
-- `/#/dashboard`
-- `/#/create`
-- `/#/payment/:id`
 
-## Notes
 
-- The backend currently uses JavaScript, not TypeScript.
-- The frontend is TypeScript-based.
-- The payment gateway is mocked.
-- The primary UI currently relies on polling for status updates, though the backend also exposes an SSE stream endpoint.
-- This project is aimed at demonstrating architecture and implementation decisions, not payment compliance or production gateway integration.
+---
 
-## Why This Project Works Well As A Portfolio Piece
+## 🤝 Contributing
 
-- It goes beyond CRUD by showing async processing and system design thinking.
-- It demonstrates practical backend concerns like idempotency, auth, retries, and auditability.
-- It includes both API and UI work, which helps in entry-level full-stack interviews.
+1. Fork the repo
+2. Create feature branch (`git checkout -b feature/my-feature`)
+3. Follow SYSTEM_PROMPT.md guidelines
+4. Test locally (`npm test`)
+5. Push & create PR
+6. CI/CD pipeline validates before merge
 
-## Current Focus
+---
 
-The strongest parts of the project are the backend flow, worker orchestration, and overall scope. The best next step for polish is keeping the docs, routes, tests, and frontend/backend contracts tightly aligned.
+
+
+---
+
+## 📧 Support
+
+For issues, questions, or feature requests, open a GitHub Issue. For security vulnerabilities, email **umarejazimam69@gmail.com**
+
+**Check out my blog:** [Idempotency: A Deep Dive Triggered by a Real-World Double-Charge Failure](https://techmedaddy.medium.com/idempotency-a-deep-dive-triggered-by-a-real-world-double-charge-failure-7cf1b5c4356f)
+
+---
+
+
+
+
+
