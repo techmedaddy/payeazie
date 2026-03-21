@@ -54,18 +54,18 @@ There is no root-level one-command orchestrator today. The backend and frontend 
 
 ```mermaid
 flowchart LR
-    UI[Frontend UI<br/>React + Vite] -->|REST| API[Fastify API]
-    UI -->|Hash Router navigation| UI
+    UI["Frontend UI<br>React + Vite"] -->|REST| API["Fastify API"]
+    UI -->|Navigation| ROUTER["Hash Router"]
 
     API --> DB[(PostgreSQL)]
     API --> REDIS[(Redis)]
-    API --> SSE[SSE stream endpoint]
-    API --> METRICS[/health, /metrics/summary]
+    API --> SSE["SSE stream endpoint"]
+    API --> METRICS["Health and metrics endpoints"]
 
-    REDIS --> CHARGE[Charge Worker]
-    REDIS --> RECON[Reconcile Worker]
+    REDIS --> CHARGE["Charge Worker"]
+    REDIS --> RECON["Reconcile Worker"]
 
-    CHARGE --> GATEWAY[Mock Gateway Client]
+    CHARGE --> GATEWAY["Mock Gateway Client"]
     RECON --> GATEWAY
 
     CHARGE --> DB
