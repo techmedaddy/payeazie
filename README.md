@@ -1,610 +1,608 @@
-# 💳 PAYEAZIE – Payment Orchestration Platform
+# Payeazie
 
-A production-grade payment processing system demonstrating modern full-stack architecture, asynchronous job queues, real-time status synchronization, and enterprise-grade authentication with audit logging.
+Payeazie is a full-stack payment operations application built around a simple but realistic payment lifecycle: create a payment, process it asynchronously, reconcile long-running states, expose audit history, and give internal operators a controlled way to intervene when something goes wrong.
 
-**Built with:** Node.js + Express + TypeScript | React + Vite | PostgreSQL + Supabase | Redis + BullMQ | Render Deployment
+The current repository sits between a prototype and a productized internal tool. It has enough operational behavior to model real payment workflows, while still using a mock gateway and local-first infrastructure so the system is easy to run, inspect, and extend.
 
-<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/1860dc21-d1ff-4919-8104-77913bbb7184" />
+## What The Project Covers
 
+- Merchant-facing payment creation and tracking
+- Asynchronous charge processing through Redis and BullMQ workers
+- State-machine-based payment transitions with audit logging
+- Refunds with eligibility rules and operator attribution
+- Retry and stuck-payment recovery actions with backend guardrails
+- Internal ops dashboard for all-payments visibility and manual actions
+- Internal gateway/webhook simulator for controlled status changes
+- JWT auth, Google OAuth, forgot-password, and reset-password flows
+- Health and metrics endpoints for basic operational visibility
 
----
+## Repository Layout
 
-## 🏗️ High-Level Architecture
-
-```mermaid
-graph TB
-    FE["⚛️ React Frontend<br/>(Vite)"]
-    API["🔌 Express API<br/>(Node.js/TS)"]
-    DB[(🗄️ Supabase<br/>PostgreSQL)]
-    REDIS["📨 Redis<br/>(Job Queue)"]
-    CHARGE["⚡ Charge Worker<br/>(BullMQ)"]
-    RECONCILE["🔄 Reconcile Worker<br/>(BullMQ)"]
-    GATEWAY["🏦 Payment Gateway<br/>(Mocked)"]
-    AUDIT["📋 Audit Logs<br/>(DB)"]
-    
-    FE -->|REST + Polling| API
-    API -->|CRUD + Status| DB
-    API -->|Enqueue Job| REDIS
-    REDIS -->|Job Events| CHARGE
-    REDIS -->|Job Events| RECONCILE
-    CHARGE -->|Process + Update| DB
-    CHARGE -->|API Call| GATEWAY
-    RECONCILE -->|Sync + Verify| DB
-    CHARGE -->|Log Transition| AUDIT
-    RECONCILE -->|Log Transition| AUDIT
-    FE -->|View Logs| API
-    
-    style FE fill:#61dafb,stroke:#333,color:#000
-    style API fill:#68a063,stroke:#333,color:#fff
-    style DB fill:#3ecf8e,stroke:#333,color:#fff
-    style REDIS fill:#dc382d,stroke:#333,color:#fff
-    style CHARGE fill:#ff9800,stroke:#333,color:#fff
-    style RECONCILE fill:#ff9800,stroke:#333,color:#fff
-    style GATEWAY fill:#999,stroke:#333,color:#fff
-    style AUDIT fill:#2196f3,stroke:#333,color:#fff
+```text
+.
+├── backend/         Fastify API, workers, PostgreSQL access, auth, audit, queues
+├── frontend/        React + Vite UI for merchant and internal operator workflows
+└── README.md        Root project guide
 ```
 
-**Key Design Choices:**
-- **Decoupled Workers:** Charge & reconcile as independent job consumers for fault isolation
-- **Redis Queue:** BullMQ provides job persistence, retries, and event-driven architecture
-- **Polling Frontend:** React polls `/payments/:id` for real-time lifecycle visibility
-- **Audit-First:** Every status transition logged with user, timestamp, and delta
+There is no root-level one-command orchestrator today. The backend and frontend are run separately.
 
----
+## Tech Stack
 
+### Backend
 
-## 📊 Payment Lifecycle & Data Flow
+- Node.js
+- Fastify
+- PostgreSQL via `pg-promise`
+- Redis
+- BullMQ
+- JWT authentication
+- Google OAuth 2.0
+- Nodemailer for password reset email delivery
+- Vitest for tests
+
+### Frontend
+
+- React 19
+- TypeScript
+- Vite
+- React Router
+- Recharts
+- Vitest + Testing Library
+
+## Current Architecture
+
+```mermaid
+flowchart LR
+    UI[Frontend UI<br/>React + Vite] -->|REST| API[Fastify API]
+    UI -->|Hash Router navigation| UI
+
+    API --> DB[(PostgreSQL)]
+    API --> REDIS[(Redis)]
+    API --> SSE[SSE stream endpoint]
+    API --> METRICS[/health, /metrics/summary]
+
+    REDIS --> CHARGE[Charge Worker]
+    REDIS --> RECON[Reconcile Worker]
+
+    CHARGE --> GATEWAY[Mock Gateway Client]
+    RECON --> GATEWAY
+
+    CHARGE --> DB
+    RECON --> DB
+    API --> AUDIT[(payment_audit_log)]
+    CHARGE --> AUDIT
+    RECON --> AUDIT
+```
+
+## Architectural Patterns In Use
+
+### 1. API + worker split
+
+Payment creation returns quickly after persistence and queueing. Gateway interaction happens in background workers rather than inside the request-response path.
+
+### 2. Explicit status lifecycle
+
+Payment states are centralized in the backend and validated through a shared transition model rather than being treated as free-form strings.
+
+### 3. Audit-first transitions
+
+Status changes are not just updates to the `payments` table. They are paired with audit records that capture actor, source, metadata, and timestamps.
+
+### 4. Recovery as a first-class concern
+
+Retry, reconcile, restart, refund, and simulated gateway updates are treated as explicit operational actions with backend guardrails, not ad hoc UI buttons.
+
+### 5. Role-aware internal surfaces
+
+Merchants primarily see their own payments. Internal operators with `admin` or `ops` roles can access all payments and internal recovery tools.
+
+### 6. Local-first infrastructure
+
+The stack assumes PostgreSQL and Redis are available locally. The gateway is mocked by default, which keeps the project runnable without third-party payment credentials.
+
+## End-To-End Payment Flow
 
 ```mermaid
 sequenceDiagram
-    actor User as User
+    actor User
     participant FE as Frontend
-    participant API as Express API
+    participant API as Fastify API
     participant DB as PostgreSQL
-    participant QUEUE as BullMQ
-    participant WORKER as Charge Worker
+    participant Q as BullMQ
+    participant CW as Charge Worker
     participant GW as Gateway
-    
-    User->>FE: Create Payment ($50)
-    FE->>API: POST /payments (userId, amount, metadata)
-    API->>DB: INSERT payment (status=pending)
-    API->>QUEUE: Enqueue charge_job
-    API-->>FE: {id, status: pending, ...}
-    
-    QUEUE->>WORKER: Dequeue charge_job
-    WORKER->>DB: UPDATE status=processing (acquire lock)
-    WORKER->>GW: Call Gateway API (charge $50)
-    GW-->>WORKER: {status: succeeded, transactionId: tx_123}
-    WORKER->>DB: UPDATE status=succeeded, txId, gateway_response
-    WORKER->>DB: INSERT audit_log (pending→succeeded, systemUser)
-    WORKER-->>QUEUE: Job completed
-    
-    FE->>API: Poll GET /payments/:id (every 2s)
-    API->>DB: SELECT * FROM payments
-    DB-->>API: {status: succeeded, ...}
-    API-->>FE: Current payment state
-    FE->>FE: Render succeeded badge ✅
-    
-    FE->>API: GET /audit-logs (user=userId)
-    API-->>FE: [{transitionType, from, to, timestamp, ...}]
-    FE->>FE: Display lifecycle breadcrumb
-```
-<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/afab7256-64b9-4cd6-96f7-f29c804fbf45" />
+    participant AUDIT as Audit Log
 
+    User->>FE: Create payment
+    FE->>API: POST /api/payments or /api/payments/intents
+    API->>DB: Insert payment as pending
+    API->>Q: Enqueue charge job
+    API-->>FE: Payment response
 
-**Payment States:**
-| State | Trigger | Worker Action |
-|-------|---------|---|
-| `pending` | API received request | Stored in DB, job enqueued |
-| `processing` | Worker acquired job lock | Gateway call in progress |
-| `succeeded` | Gateway returned success | Status + transaction ID persisted, audit logged |
-| `failed` | Gateway error or timeout | Error persisted, audit logged, no retry by default |
+    Q->>CW: Dequeue charge job
+    CW->>DB: pending -> processing
+    CW->>AUDIT: Log automatic transition
+    CW->>GW: Charge request
 
----
+    alt gateway success
+        GW-->>CW: succeeded
+        CW->>DB: Update payment
+        CW->>AUDIT: Log processing -> succeeded
+    else gateway failure
+        GW-->>CW: failed
+        CW->>DB: Update payment
+        CW->>AUDIT: Log processing -> failed
+    end
 
-## 🎯 Low-Level Design – Component Breakdown
-
-### Backend Layered Architecture
-
-```
-┌─────────────────────────────────────────────────────┐
-│             ROUTES / CONTROLLERS                     │
-│  (/api/routes: payment, auth, audit, health)        │
-├─────────────────────────────────────────────────────┤
-│             BUSINESS LOGIC LAYER                     │
-│  ├─ paymentService (create, fetch, list)           │
-│  ├─ authService (login, register, OAuth, reset)    │
-│  ├─ statusTransitionService (validate state change) │
-│  ├─ auditService (log transitions)                 │
-│  └─ rateLimitService (track login attempts)        │
-├─────────────────────────────────────────────────────┤
-│             WORKER LAYER (Job Consumers)            │
-│  ├─ charge.worker (process payment, call gateway)  │
-│  ├─ reconcile.worker (sync & verify)               │
-│  └─ queue.utils (job enqueueing, events)           │
-├─────────────────────────────────────────────────────┤
-│             DATA ACCESS LAYER                       │
-│  ├─ paymentDB (queries, mutations)                 │
-│  ├─ auditDB (insertAuditLog)                       │
-│  ├─ userDB (auth, roles)                           │
-│  └─ migrations (schema evolution)                  │
-├─────────────────────────────────────────────────────┤
-│             INFRA LAYER                             │
-│  ├─ db.pool (PostgreSQL connection pool)           │
-│  ├─ redis.client (BullMQ queue client)             │
-│  ├─ logger (structured JSON logging)               │
-│  └─ config (env-based settings)                    │
-└─────────────────────────────────────────────────────┘
-
-Frontend Components:
-┌──────────────────────┐
-│   App.tsx (Router)   │
-├──────────────────────┤
-│  Pages:              │
-│  ├─ Dashboard        │
-│  ├─ PaymentForm      │
-│  ├─ PaymentDetail    │
-│  └─ AuditLog         │
-├──────────────────────┤
-│  Components:         │
-│  ├─ StatusBadge      │
-│  ├─ PaymentCard      │
-│  ├─ LifecycleBread   │
-│  └─ AuditTable       │
-├──────────────────────┤
-│  Context:            │
-│  ├─ AuthContext      │
-│  └─ PaymentContext   │
-├──────────────────────┤
-│  Services:           │
-│  ├─ paymentService   │
-│  ├─ authService      │
-│  └─ auditService     │
-└──────────────────────┘
+    FE->>API: GET /api/payments/:paymentId
+    API-->>FE: Rich payment detail with audit + recovery metadata
 ```
 
----
+## Status Model
 
-## 🔐 Authentication & Security Architecture
+The backend lifecycle lives in `backend/src/utils/payment-status.js` and is the source of truth for finality, retryability, refundability, and transition validity.
 
-```
-┌─────────────────────────────────────────────────┐
-│                   User Login                     │
-└────────────────────┬────────────────────────────┘
-                     │
-                     ▼
-          ┌──────────────────────┐
-          │  Email / Password    │
-          │  or Google OAuth     │
-          └──────────┬───────────┘
-                     │
-                     ▼
-          ┌──────────────────────────────┐
-          │  POST /auth/login             │
-          │  POST /auth/register          │
-          │  POST /auth/google            │
-          │  POST /auth/reset-password    │
-          └──────────┬───────────────────┘
-                     │
-          ┌──────────▼───────────┐
-          │  Rate Limit Check    │
-          │  (5 attempts/10min)  │
-          └──────────┬───────────┘
-                     │
-          ┌──────────▼───────────────┐
-          │  Validate Input          │
-          │  Hash Password (bcrypt)  │
-          │  Query PostgreSQL        │
-          └──────────┬───────────────┘
-                     │
-          ┌──────────▼──────────────────┐
-          │  Generate JWT Token        │
-          │  (expires: 24h)            │
-          │  Refresh Token in Cookie   │
-          └──────────┬──────────────────┘
-                     │
-                     ▼
-          ┌──────────────────────┐
-          │  Return to Frontend  │
-          │  (Authorization      │
-          │   header ready)      │
-          └──────────────────────┘
-```
+### Supported statuses
 
-**Security Features:**
-- ✅ **Rate Limiting:** 5 attempts/10min on login (Redis-backed)
-- ✅ **Password Reset:** Token-based (expires 30min), sent via email
-- ✅ **Google OAuth2:** Passport.js strategy with refresh token handling
-- ✅ **JWT Validation:** Middleware on protected routes
-- ✅ **Per-User Dashboard:** Users only see their own payments
+| Status | Meaning |
+| --- | --- |
+| `pending` | Payment exists and is ready to be worked |
+| `processing` | Worker has picked it up or the gateway state is in flight |
+| `succeeded` | Charge completed successfully |
+| `failed` | Charge failed or the payment was returned to a failed outcome |
+| `refunded` | A previously successful payment was refunded |
 
----
+### Allowed transitions
 
-<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/ae9fde65-3190-4a4b-9a95-7f3ef1631572" />
+| From | To |
+| --- | --- |
+| `pending` | `processing`, `failed` |
+| `processing` | `pending`, `succeeded`, `failed` |
+| `succeeded` | `refunded` |
+| `failed` | `pending` |
+| `refunded` | none |
 
+### Final states
 
-## 🚀 CI/CD Pipeline & Deployment
+- `succeeded`
+- `failed`
+- `refunded`
 
-```
-GitHub Push (main)
-       │
-       ▼
-  GitHub Actions
-       │
-    ┌──┴──┐
-    │     │
-    ▼     ▼
- Lint   Test
- (ESLint,  (Vitest/Jest)
-  Prettier)
-    │     │
-    └──┬──┘
-       ▼
-    Build
- (TS Compile +
-  Vite Bundle)
-       │
-       ▼
-  Docker Build
- (Multi-stage)
-       │
-    ┌──┴───────┐
-    │          │
-    ▼          ▼
-  Render    Netlify
-  (API)   (Frontend)
-    │          │
-    └──────┬───┘
-           ▼
-      Health Check
-     (POST deploy)
+### Operational guardrails currently enforced
+
+- Refund is only allowed from `succeeded`
+- Retry is only allowed from `failed`
+- Refunded payments cannot transition further
+- Reconcile and restart are aimed at stuck `processing` payments
+- Internal simulator actions are restricted to internal roles
+
+## Manual Actions And Recovery Model
+
+The application now treats operations support as part of the normal flow, not as an afterthought.
+
+| Action | Intended use | Current backend rule |
+| --- | --- | --- |
+| Refund | Reverse a completed charge | Only `succeeded` payments, reason required |
+| Retry | Reprocess a failed payment | Only `failed` payments, with retry guardrails |
+| Reconcile | Check a long-running processing payment against gateway state | Used for stuck `processing` records with gateway context |
+| Restart | Move a stuck processing payment back into the queue path | Used for stuck `processing` records that need to be requeued |
+| Simulate gateway status | Trigger controlled internal state changes | Internal-only, valid next statuses only |
+
+## Payment Recovery Flow
+
+```mermaid
+flowchart TD
+    P[Payment detail or Ops dashboard] --> S{Current state}
+    S -->|Succeeded| R[Refund]
+    S -->|Failed| RT[Retry]
+    S -->|Processing and stuck| C{Has gateway charge id?}
+    C -->|Yes| REC[Reconcile]
+    C -->|No| RES[Restart]
+
+    R --> A1[Audit log with actor, time, reason, source]
+    RT --> A2[Audit log with actor and source]
+    REC --> A3[Audit log with operator metadata]
+    RES --> A4[Audit log with operator metadata]
 ```
 
-**Pipeline Stages:**
-1. **Lint & Test:** ESLint + Prettier (code quality), Vitest/Jest (unit & integration)
-2. **Build:** TypeScript compilation, Vite frontend bundle
-3. **Docker:** Multi-stage builds for optimized images
-4. **Deploy:** Render (backend), Netlify (frontend)
-5. **Health Check:** POST-deploy endpoint validation
+## Backend Design
 
----
-<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/03e6b44f-4476-43cf-b116-2c2104affb8f" />
+### API surface
 
+The backend runs as a Fastify server and registers payment, auth, and audit routes under `/api` or `/api/auth`.
 
-## 📦 Deployment Architecture (Render + Supabase)
+#### Health and metrics
 
-```
-┌────────────────────────────────────────────────────────────┐
-│                      THE INTERNET                          │
-└──────────┬────────────────────────┬───────────────────┬────┘
-           │                        │                   │
-    ┌──────▼─────┐          ┌──────▼──────┐      ┌──────▼────┐
-    │  Netlify   │          │   Render    │      │ Supabase  │
-    │ (Frontend) │          │  (Backend)  │      │(PostgreSQL│
-    │            │          │             │      │ + Redis)  │
-    │ React App  │◄────────►│ Node.js API │◄────►│           │
-    │ (Static)   │ REST API │ + Workers   │      │ Vector DB │
-    │            │          │             │      │ (Auth)    │
-    └────────────┘          └─────────────┘      └───────────┘
-         │                         │                    │
-    Deployed on                 Deployed on          Managed
-    CDN (Global)              Web Service           Cloud DB
-                              (Auto-scaling)
-    
-    Frontend:                Backend:                 DB:
-    - Vite build            - Fastify server        - PostgreSQL
-    - TailwindCSS           - Redis (BullMQ)        - Connection pooling
-    - JWT auth header       - Workers (charge,      - Automated backups
-    - Polling interval:2s     reconcile)            - Row-level security
-```
+- `GET /`
+- `GET /health`
+- `GET /health/detailed`
+- `GET /metrics`
+- `GET /metrics/summary`
 
-**Deployment Strategy:**
-- **Frontend:** Static site on Netlify CDN (instant updates)
-- **Backend:** Docker container on Render with auto-scaling
-- **Database:** Managed PostgreSQL on Supabase (no DevOps overhead)
-- **Queue:** Redis instance included in Supabase dashboard
-- **Environment Separation:** Dev (localhost), Staging (staging env), Prod (main env)
+#### Auth endpoints
 
----
+- `POST /api/auth/register`
+- `POST /api/auth/login`
+- `GET /api/auth/me`
+- `POST /api/auth/forgot-password`
+- `POST /api/auth/reset-password`
+- `GET /api/auth/google`
+- `GET /api/auth/google/callback`
 
-## 🛠️ Tech Stack & Trade-offs
+#### Payment endpoints
 
-| Layer | Technology | Why | Trade-off |
-|-------|-----------|-----|-----------|
-| **Backend Framework** | Express (Fastify) | Lightweight, middleware-friendly | ~100ms slower than Rust/Go |
-| **Language** | Node.js + TypeScript | Type safety + ecosystem | Single-threaded (I/O-bound OK) |
-| **Database** | PostgreSQL (Supabase) | ACID + JSON support + managed | NoSQL more scalable for writes |
-| **Job Queue** | BullMQ + Redis | Reliable retries + events | Redis memory limits (solved w/ Cluster) |
-| **Frontend** | React + Vite | Component reuse + fast build | SPA larger bundle vs SSR |
-| **Authentication** | JWT + Passport | Stateless, standard OAuth | Token refresh needed every 24h |
-| **Polling** | 2s interval | Real-time feel, minimal latency | WebSocket better for high-frequency |
-| **Deployment** | Render + Netlify | Managed, zero DevOps | Higher cost vs bare VPS |
+- `GET /api/payments`
+- `GET /api/payments/:paymentId`
+- `POST /api/payments`
+- `POST /api/payments/intents`
+- `GET /api/payments/:paymentId/audit`
+- `GET /api/payments/:paymentId/stream`
+- `POST /api/payments/:paymentId/refund`
+- `POST /api/payments/:paymentId/retry`
+- `POST /api/payments/:paymentId/reconcile`
+- `POST /api/payments/:paymentId/restart`
+- `POST /api/payments/:paymentId/simulate-gateway`
+- `POST /api/payments/reconcile`
+- `POST /api/payments/webhook`
 
----
+### Backend module responsibilities
 
-## 🐛 Common Bugs & Issues Solved
+| Area | Purpose |
+| --- | --- |
+| `server.js` | Bootstraps env validation, migrations, Fastify plugins, routes, workers, and health/metrics endpoints |
+| `src/api/controllers/` | Request handlers for payments, auth, audit, webhook, and SSE |
+| `src/api/routes/` | Route registration and schema definitions |
+| `src/api/middleware/` | JWT auth, rate limiting, request logging, internal-role enforcement |
+| `src/core/status-transition/` | Central transition engine and audit/event metadata handling |
+| `src/core/orchestrator/` | Payment orchestration helpers that coordinate state and gateway results |
+| `src/db/` and `src/db/models/` | PostgreSQL connection and data access |
+| `src/utils/queue.js` | BullMQ queue helpers and worker creation |
+| `src/workers/` | Charge processing and reconciliation background jobs |
+| `src/utils/payment-status.js` | Shared lifecycle rules |
+| `src/utils/roles.js` | Internal role detection and access helpers |
 
-### ✅ Payment Status Stuck in "Processing"
+### Data model shape
 
-**Problem:** Worker crashes → job dropped → payment never completes.  
-**Solution:** 
-- Implement job timeout (30s) → auto-move to failed
-- Add dead-letter queue for failed jobs
-- Periodic reconciliation worker sweeps stale records
+At a high level, the backend revolves around a few core entities:
 
-### ✅ Race Condition: Duplicate Charge
+- `payments`
+  Stores order id, amount, currency, lifecycle status, idempotency key, gateway charge id, and ownership context.
+- `payment_audit_log`
+  Stores status changes and operational actions with metadata, actor, source, and timestamps.
+- `gateway_events`
+  Tracks incoming or simulated gateway events used for reconciliation and webhook handling.
+- `users`
+  Stores login identity, password hash or OAuth-linked account details, and role.
 
-**Problem:** Two workers process same payment concurrently.  
-**Solution:**
-- Database row lock (`SELECT ... FOR UPDATE`) during status transition
-- Idempotent gateway calls (transaction ID deduplication)
-- Log all transitions with timestamp for audit trail
+### Request handling pattern
 
-### ✅ Frontend Polling Creates Stale State
+For most payment mutations, the request path follows this pattern:
 
-**Problem:** User sees old status, backend updated minutes ago.  
-**Solution:**
-- Force refresh after payment action (no cache)
-- Implement exponential backoff after 10s (reduce polling spam)
-- Add "Last Updated" timestamp to response
-- Use ETag/If-None-Match for efficient polling
+1. Authenticate the user.
+2. Validate payload and route params.
+3. Check ownership or internal-role access.
+4. Load current payment state.
+5. Enforce lifecycle guardrails.
+6. Persist transition or enqueue asynchronous work.
+7. Append audit metadata.
+8. Return a UI-friendly response with status, recovery hints, and context.
 
-### ✅ Redis Connection Drops in Production
+### Queue and worker behavior
 
-**Problem:** Worker queues freeze, job loss risk.  
-**Solution:**
-- Redis cluster with Sentinel for failover
-- Implement circuit breaker pattern (fallback to sync processing)
-- Monitor queue depth & worker lag (Prometheus metrics)
-- Auto-reconnect with exponential backoff
+BullMQ is used for two main background workloads:
 
-### ✅ Gateway Timeout Leaves Payment in Limbo
+- Charge processing
+  Picks up queued payments, moves them to `processing`, calls the gateway client, and finalizes them as `succeeded` or `failed`.
+- Reconciliation
+  Reviews long-running or potentially inconsistent payments and attempts to realign local state with gateway state.
 
-**Problem:** API timeout → worker unsure if charge succeeded.  
-**Solution:**
-- Gateway returns transaction ID immediately (not `pending`)
-- Worker queries gateway for final status asynchronously
-- Reconciliation worker runs every 5min to catch orphaned payments
+This split matters because it keeps user-facing API latency separate from gateway timing and creates a clear place for retry/recovery logic.
 
-### ✅ OAuth Token Refresh Expires in Middle of Session
+### Audit and ops metadata
 
-**Problem:** User logged in, token expires, refresh fails.  
-**Solution:**
-- Refresh token stored in secure HttpOnly cookie (not localStorage)
-- Auto-refresh 5min before expiry (background job)
-- Graceful redirect to login on 401
+The audit trail is richer than a simple status history. The current backend records whether a status change was:
 
-### ✅ Audit Logs Don't Match Payment Status
+- `automatic`
+- `user_triggered`
+- `admin_triggered`
 
-**Problem:** User action logged but payment status unchanged.  
-**Solution:**
-- Enforce audit log AFTER status transition (transactional)
-- Use database triggers for audit on DELETE/UPDATE
-- Verify audit log count matches payment state transitions
+That metadata is surfaced back to the UI so detail views can explain not just what changed, but how it changed.
 
-### ✅ Rate Limiting False Positives (Shared IPs)
+## Frontend Design
 
-**Problem:** Corporate network blocked after 5 failed logins.  
-**Solution:**
-- Rate limit by username + IP (not just IP)
-- Whitelist corporate IPs in `.env`
-- Implement CAPTCHA after 3 failures
-- Send email notification on suspicious activity
+The frontend uses React with a hash-based router and a protected-route model for authenticated pages.
 
-### ✅ Frontend Renders "Unknown" Status
+### Primary routes
 
-**Problem:** API returns new status type, React crashes.  
-**Solution:**
-- Frontend has fallback render for unrecognized statuses
-- Use status enum validation in TypeScript (strict types)
-- Log unexpected statuses to Sentry
+| Route | Purpose |
+| --- | --- |
+| `/#/login` | Email/password sign-in |
+| `/#/register` | User registration |
+| `/#/forgot-password` | Password reset request |
+| `/#/reset-password` | Password reset submission |
+| `/#/dashboard` | Main merchant dashboard |
+| `/#/create` | Create payment screen |
+| `/#/payment/:id` | Detailed payment lifecycle page |
+| `/#/account` | Basic account panel |
+| `/#/ops` | Internal operator dashboard, restricted to `admin` and `ops` |
 
-### ✅ Worker Processes Job But Doesn't Update DB
+### Frontend structure
 
-**Problem:** Gateway returns success but DB commit fails.  
-**Solution:**
-- Wrap worker logic in transaction (all-or-nothing)
-- Retry mechanism on DB errors (not gateway errors)
-- Dead-letter queue for jobs failing >3 times
+| Area | Purpose |
+| --- | --- |
+| `App.tsx` | Top-level routing and providers |
+| `context/` | Auth state and toast notifications |
+| `components/ProtectedRoute.tsx` | Route-level auth and role gating |
+| `components/ui/Layout.tsx` | Shared shell and navigation |
+| `pages/Dashboard.tsx` | Merchant dashboard with metrics, filters, tables, and recovery visibility |
+| `pages/OpsDashboard.tsx` | Internal view for all payments, stuck queue, failure spikes, and simulator |
+| `pages/PaymentDetails.tsx` | Rich lifecycle detail, audit trail, refund/retry/recovery actions |
+| `services/api.ts` | Shared fetch wrapper, auth token management, retry logic, redirect handling |
+| `services/payments.ts` | Payment API client methods |
+| `hooks/usePaymentDetails.ts` | Normalizes backend detail payload into UI-friendly state |
+| `utils/paymentMetrics.ts` | Shared success/failure/refund/latency storytelling helpers |
 
----
+### UI model
 
-## 📁 Project Structure
+The frontend is intentionally not just a CRUD wrapper over the API. It interprets backend state into:
 
-```
-payeazie/
-├── backend/
-│   ├── src/
-│   │   ├── api/
-│   │   │   ├── controllers/          (Request handlers)
-│   │   │   ├── routes/               (payment, auth, audit routes)
-│   │   │   └── middleware/           (auth, errorHandler, cors)
-│   │   ├── core/
-│   │   │   ├── orchestrator/         (Payment orchestration logic)
-│   │   │   ├── status-transition/    (State machine for payment status)
-│   │   │   └── idempotency/          (Idempotent request handling)
-│   │   ├── db/
-│   │   │   ├── config/               (Connection pooling)
-│   │   │   ├── models/               (DB queries)
-│   │   │   └── index.js              (DB exports)
-│   │   ├── workers/
-│   │   │   ├── charge.worker.js      (Process payments via gateway)
-│   │   │   ├── reconcile.worker.js   (Sync & verify payments)
-│   │   │   └── __tests__/
-│   │   └── utils/
-│   │       ├── queue.js              (BullMQ client & job management)
-│   │       ├── logger.js             (Structured logging)
-│   │       ├── metrics.js            (Prometheus metrics)
-│   │       ├── gateway-client.js     (Payment gateway API)
-│   │       ├── email.service.js      (Email notifications)
-│   │       ├── passport.config.js    (OAuth2 strategy)
-│   │       ├── payment-status.js     (Status constants)
-│   │       └── config.js             (App configuration)
-│   │
-│   ├── migrations/
-│   │   ├── 001_create_payments_table.sql
-│   │   ├── 002_create_audit_log.sql
-│   │   ├── 003_create_events_table.sql
-│   │   ├── 004_create_users_table.sql
-│   │   ├── 005_add_user_id_to_payments.sql
-│   │   ├── 006_add_role_to_users.sql
-│   │   ├── 007_create_password_resets_table.sql
-│   │   ├── 008_add_google_oauth_to_users.sql
-│   │   └── 009_add_user_tracking_to_audit_log.sql
-│   │
-│   ├── scripts/
-│   │   ├── migrate.js                (Run migrations)
-│   │   ├── seed-payments.js
-│   │   ├── monitor-dashboard.sh
-│   │   └── ...
-│   │
-│   ├── tests/
-│   │   ├── auth.phase1.test.js
-│   │   └── ...
-│   │
-│   ├── server.js                     (Express/Fastify entry point)
-│   ├── vitest.config.js
-│   └── package.json
-│
-├── frontend/
-│   ├── components/
-│   │   ├── Logo.tsx
-│   │   ├── ProtectedRoute.tsx
-│   │   └── ui/                       (UI component library)
-│   │
-│   ├── pages/
-│   │   ├── Dashboard.tsx             (User payment list)
-│   │   ├── CreatePayment.tsx         (Payment form)
-│   │   ├── PaymentDetails.tsx        (Single payment + audit log)
-│   │   ├── Login.tsx
-│   │   ├── Register.tsx
-│   │   ├── GoogleCallback.tsx        (OAuth callback handler)
-│   │   └── NotFound.tsx
-│   │
-│   ├── context/
-│   │   ├── AuthContext.tsx           (User auth state)
-│   │   └── ToastContext.tsx          (Notifications)
-│   │
-│   ├── services/
-│   │   ├── api.ts                    (HTTP client, base URL)
-│   │   ├── payments.ts               (Payment API calls)
-│   │   └── payments.test.ts
-│   │
-│   ├── hooks/                        (Custom React hooks)
-│   ├── utils/                        (Formatters, validators)
-│   │
-│   ├── App.tsx                       (Main router)
-│   ├── index.tsx
-│   ├── vite.config.ts
-│   ├── vitest.config.ts
-│   └── package.json
-│
-├── README.md                         (This file - project overview)
-├── SYSTEM_PROMPT.md                  (Copilot/AI guidelines)
-└── package.json                      (Root workspace config)
+- status badges
+- retry/refund eligibility messages
+- stuck-processing indicators
+- refund summaries and audit context
+- operator-facing manual actions
+- metric narratives such as success rate, failure rate, refund rate, and processing latency
+
+## Auth And Access Model
+
+```mermaid
+flowchart TD
+    U[User] --> L[Login or register]
+    U --> G[Google OAuth]
+    U --> F[Forgot password]
+
+    L --> JWT[JWT token issued]
+    G --> JWT
+    F --> RP[Reset password]
+    RP --> JWT
+
+    JWT --> PR[Protected routes]
+    PR --> DASH[Merchant dashboard]
+    PR --> PAY[Payment details]
+    PR --> ACC[Account]
+
+    PR --> OPS{Role is admin or ops?}
+    OPS -->|Yes| O1[Ops dashboard]
+    OPS -->|No| O2[Ops route blocked]
 ```
 
-<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/78196ea5-4d6c-4369-94b4-dbbf70c59708" />
+### Auth behavior currently implemented
 
+- Email/password registration and login
+- JWT-based protected API access
+- Google OAuth callback flow
+- Forgot-password request and reset-password submission
+- Session-expiry handling in the frontend API client
+- Inline feedback and auth-related toast support
+- Account page with name, email, and role
 
-**Key Directories:**
-- `backend/src/core/orchestrator/` – Payment processing orchestration
-- `backend/src/workers/` – BullMQ job consumers (charge, reconcile)
-- `backend/src/utils/queue.js` – Job enqueueing & event handling
-- `frontend/pages/` – Page-level components (routed)
-- `frontend/services/` – API integration & HTTP client
+## Dashboards And Operational Visibility
 
----
+### Merchant dashboard
 
-## 🎮 Quick Start – Local Development
+The merchant dashboard is the main day-to-day surface. It currently includes:
+
+- search and status/date filtering
+- gross and net payment metrics
+- refund-aware metrics
+- charts for payment volume
+- recent activity
+- payment table
+- processing and stuck-payment visibility
+- performance storytelling based on current payment data
+
+### Ops dashboard
+
+The ops dashboard is designed for internal support and operational recovery. It currently includes:
+
+- all-payments visibility across users
+- stuck processing queue
+- failed payments queue
+- failure spike monitor
+- manual retry, reconcile, and restart actions
+- gateway/webhook simulator panel
+- outcome metrics and performance story
+
+## Metrics And Observability
+
+### HTTP endpoints
+
+- `/health`
+  Lightweight process health
+- `/health/detailed`
+  Process health plus PostgreSQL and Redis connectivity
+- `/metrics`
+  Raw metric payload
+- `/metrics/summary`
+  Aggregated summary payload
+
+### UI-facing operational metrics
+
+The frontend now tells a more complete story than simple counts:
+
+- success rate
+- failure rate
+- refund rate
+- average processing latency
+
+These are calculated from available payment data rather than inferred from gateway internals that do not exist in the current implementation.
+
+## Running The Project Locally
 
 ### Prerequisites
+
+- Node.js 18+ recommended
+- PostgreSQL
+- Redis
+
+### 1. Start the backend
+
 ```bash
-Node.js 18+, PostgreSQL 12+, Redis 6+
-```
-
-### Setup
-
-```bash
-# Clone & install
-git clone https://github.com/yourusername/payeazie.git
-cd payeazie
-
-# Backend
 cd backend
 npm install
-cp .env.example .env          # Configure DB & Redis URLs
-npm run migrate               # Run migrations
-npm run dev                   # Start Express + Workers
+cp .env.example .env
+```
 
-# Frontend (new terminal)
+Update `.env` with at least:
+
+- `DATABASE_URL`
+- `REDIS_URL`
+- `JWT_SECRET`
+
+Optional but useful for full auth coverage:
+
+- Google OAuth values
+- SMTP values for password reset email delivery
+- `FRONTEND_URL`
+
+Initialize the database:
+
+```bash
+npm run db:setup
+```
+
+Start the API and workers:
+
+```bash
+npm start
+```
+
+By default the backend runs on `http://localhost:3467`.
+
+### 2. Start the frontend
+
+```bash
 cd frontend
 npm install
-npm run dev                   # Vite dev server (http://localhost:5173)
+npm run dev
 ```
 
-### Verify
-```bash
-# Health check
-curl http://localhost:3000/health
+The frontend runs on Vite's local dev server, typically `http://localhost:5173`.
 
-# Create payment
-curl -X POST http://localhost:3000/api/payments \
-  -H "Content-Type: application/json" \
-  -d '{"amount": 50, "description": "Test charge"}'
-
-# Watch worker process it
-tail -f backend/logs/app.log
-```
-
----
-
-## 🧪 Testing
+If needed, point the frontend at a custom API origin with:
 
 ```bash
-# Unit & integration tests
-cd backend && npm test
-
-# E2E payment lifecycle
-npm run test:e2e
-
-# Frontend component tests
-cd frontend && npm test
-
-# Auth flow (Google OAuth)
-npm run test:oauth
+VITE_API_URL=http://localhost:3467
 ```
 
----
+Because the app uses `HashRouter`, the common authenticated entrypoint is:
 
+```text
+http://localhost:5173/#/dashboard
+```
 
+## Testing
 
----
+### Backend
 
-## 🤝 Contributing
+Run the backend test suite:
 
-1. Fork the repo
-2. Create feature branch (`git checkout -b feature/my-feature`)
-3. Follow SYSTEM_PROMPT.md guidelines
-4. Test locally (`npm test`)
-5. Push & create PR
-6. CI/CD pipeline validates before merge
+```bash
+cd backend
+npm test
+```
 
----
+Useful backend scripts:
 
+```bash
+npm run test:watch
+npm run test:coverage
+npm run test:ui
+```
 
+### Frontend
 
----
+Run the frontend test suite:
 
-## 📧 Support
+```bash
+cd frontend
+npm test
+```
 
-For issues, questions, or feature requests, open a GitHub Issue. For security vulnerabilities, email **umarejazimam69@gmail.com**
+Useful frontend scripts:
 
-**Check out my blog:** [Idempotency: A Deep Dive Triggered by a Real-World Double-Charge Failure](https://techmedaddy.medium.com/idempotency-a-deep-dive-triggered-by-a-real-world-double-charge-failure-7cf1b5c4356f)
+```bash
+npm run test:ui
+npm run test:coverage
+npm run build
+```
 
----
+## Recommended Reading Order In The Codebase
 
+If you are trying to understand the project quickly, this order works well:
 
+1. `backend/server.js`
+2. `backend/src/api/routes/payment.routes.js`
+3. `backend/src/api/controllers/payment.controller.js`
+4. `backend/src/core/status-transition/status-transition.service.js`
+5. `backend/src/utils/payment-status.js`
+6. `backend/src/workers/charge.worker.js`
+7. `backend/src/workers/reconcile.worker.js`
+8. `frontend/App.tsx`
+9. `frontend/pages/Dashboard.tsx`
+10. `frontend/pages/OpsDashboard.tsx`
+11. `frontend/pages/PaymentDetails.tsx`
+12. `frontend/services/payments.ts`
 
+## What Is Real Versus What Is Simulated
 
+This repository intentionally mixes real application patterns with a simulated payment provider.
 
+### Real application behavior
+
+- asynchronous queue-based processing
+- lifecycle validation
+- recovery actions and safety rules
+- audit logging
+- role-aware ops tooling
+- auth flows
+- frontend/backend integration patterns
+
+### Simulated or local-only behavior
+
+- payment gateway responses are mocked
+- internal simulator can drive gateway-like status changes on demand
+- local infrastructure is expected for PostgreSQL and Redis
+
+That balance makes the project useful for engineering work, operational design, and UI/backend iteration without pretending to be a fully integrated commercial payment platform.
+
+## Current Boundaries And Tradeoffs
+
+- The default gateway integration is mock-first, not a live processor integration.
+- There is no root-level Docker or Compose workflow in the repository today.
+- The frontend currently uses hash-based routing rather than server-backed SPA routing.
+- Local development expects PostgreSQL and Redis to be available.
+- Some backend tests are easier to run when local infrastructure is present.
+- Frontend production builds may show a large-chunk warning; the app still builds successfully.
+
+## Deployment Notes
+
+Deployment details are documented separately in:
+
+- `backend/DEPLOYMENT.md`
+
+This root README focuses on how the codebase works today rather than prescribing a single hosting model.
+
+## Summary
+
+Payeazie currently functions as a practical payment operations system with:
+
+- a merchant-facing dashboard
+- an internal ops console
+- asynchronous payment processing
+- auditable lifecycle management
+- controlled recovery and refund tooling
+- auth flows needed for a real multi-user application
+
+It is detailed enough to reason about operational payment behavior, but still compact enough to run and evolve as a local full-stack project.
