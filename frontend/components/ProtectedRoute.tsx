@@ -3,13 +3,15 @@ import { Navigate, useLocation } from 'react-router-dom';
 import { useAuthContext } from '../context/AuthContext';
 import { Loader2 } from 'lucide-react';
 import { api } from '../services/api';
+import { isInternalOperatorRole } from '../utils/roles';
 
 interface ProtectedRouteProps {
   children: React.ReactElement;
+  allowedRoles?: string[];
 }
 
-const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
-  const { isAuthenticated, isLoading } = useAuthContext();
+const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, allowedRoles }) => {
+  const { isAuthenticated, isLoading, user } = useAuthContext();
   const location = useLocation();
 
   useEffect(() => {
@@ -40,6 +42,19 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
   if (!isAuthenticated) {
     console.log(`🔒 Access denied to ${location.pathname} - redirecting to login`);
     return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
+  if (allowedRoles?.length) {
+    const normalizedAllowedRoles = allowedRoles.map((role) => role.toLowerCase());
+    const normalizedUserRole = (user?.role || '').toLowerCase();
+    const isAllowed =
+      normalizedAllowedRoles.includes(normalizedUserRole) ||
+      (normalizedAllowedRoles.includes('ops') && isInternalOperatorRole(normalizedUserRole));
+
+    if (!isAllowed) {
+      console.log(`⛔ Role ${user?.role || 'unknown'} cannot access ${location.pathname}`);
+      return <Navigate to="/dashboard" replace />;
+    }
   }
 
   return children;

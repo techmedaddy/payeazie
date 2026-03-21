@@ -1,10 +1,11 @@
 import React from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import Logo from '../Logo';
-import { LayoutDashboard, PlusCircle, User, Menu, X, Loader2, AlertCircle, CheckCircle, LogOut, ChevronDown, Settings } from 'lucide-react';
+import { LayoutDashboard, PlusCircle, User, Menu, X, Loader2, AlertCircle, CheckCircle, LogOut, ChevronDown, Settings, ShieldAlert } from 'lucide-react';
 import { cn } from '../../utils/cn';
 import { useApiHealth } from '../../hooks/useApiHealth';
 import { useAuthContext } from '../../context/AuthContext';
+import { isInternalOperatorRole } from '../../utils/roles';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -37,6 +38,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const [showUserMenu, setShowUserMenu] = React.useState(false);
   const { isHealthy, isLoading, error, data } = useApiHealth();
   const { user, logout } = useAuthContext();
+  const isInternalOperator = isInternalOperatorRole(user?.role);
 
   const closeMenus = () => {
     setIsMobileMenuOpen(false);
@@ -84,6 +86,14 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                   label="Dashboard" 
                   active={location.pathname === '/dashboard' || location.pathname === '/'} 
                 />
+                {isInternalOperator && (
+                  <NavItem
+                    to="/ops"
+                    icon={<ShieldAlert />}
+                    label="Ops Center"
+                    active={location.pathname === '/ops'}
+                  />
+                )}
                 <NavItem 
                   to="/create" 
                   icon={<PlusCircle />} 
@@ -186,6 +196,15 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                   active={location.pathname === '/create'}
                   onClick={closeMenus}
                 />
+                {isInternalOperator && (
+                  <NavItem
+                    to="/ops"
+                    icon={<ShieldAlert />}
+                    label="Ops Center"
+                    active={location.pathname === '/ops'}
+                    onClick={closeMenus}
+                  />
+                )}
                 <NavItem
                   to="/account"
                   icon={<Settings />}

@@ -1,11 +1,14 @@
 require('dotenv').config();
 
+const db = require('../../db');
 const idempotencyService = require('../../core/idempotency/idempotency.service');
 const paymentOrchestrator = require('../../core/orchestrator/payment.orchestrator');
 const metrics = require('../../utils/metrics');
 const gatewayClient = require('../../utils/gateway-client');
+const { canAccessAnyPayment, isInternalOperatorRole } = require('../../utils/roles');
 const {
     ALL_STATUSES,
+    ALLOWED_TRANSITIONS,
     REFUNDABLE_STATUSES,
     RETRYABLE_STATUSES,
     canTransition,
@@ -23,6 +26,7 @@ const RETRY_GUARDRAILS = Object.freeze({
 const PROCESSING_GUARDRAILS = Object.freeze({
     STUCK_THRESHOLD_SECONDS: 60
 });
+const SIMULATABLE_GATEWAY_STATUSES = Object.freeze(['processing', 'succeeded', 'failed', 'refunded']);
 
 const transformPaymentResponse = (payment) => {
     if (!payment) return payment;
@@ -43,6 +47,25 @@ const transformPaymentResponse = (payment) => {
 
 const getAuditSummary = (entry, metadata = {}) => {
     const actor = metadata.worker || entry.triggered_by || 'system';
+    const simulationNote = metadata.simulationNote ? ` Note: ${metadata.simulationNote}` : '';
+
+    if (metadata.action === 'gateway_simulation') {
+        if (entry.to_status === 'processing') {
+            return `Gateway simulator marked this payment as processing.${simulationNote}`;
+        }
+
+        if (entry.to_status === 'succeeded') {
+            return `Gateway simulator marked this payment as succeeded.${simulationNote}`;
+        }
+
+        if (entry.to_status === 'failed') {
+            return `Gateway simulator marked this payment as failed.${simulationNote}`;
+        }
+
+        if (entry.to_status === 'refunded') {
+            return `Gateway simulator marked this payment as refunded.${simulationNote}`;
+        }
+    }
 
     if (entry.to_status === 'processing') {
         if (metadata.action === 'stuck_restart') {
@@ -102,7 +125,7 @@ const getOperationSource = (entry, metadata = {}) => {
     }
 
     if ((entry.triggered_by || 'system') === 'user') {
-        return entry.user_role === 'admin' || metadata.actorRole === 'admin'
+        return isInternalOperatorRole(entry.user_role) || isInternalOperatorRole(metadata.actorRole)
             ? 'admin_triggered'
             : 'user_triggered';
     }
@@ -331,6 +354,40 @@ const getRetryDemoOptions = (auditLog = []) => {
     };
 };
 
+const getSimulatableGatewayStatuses = (currentStatus) =>
+    Array.from(ALLOWED_TRANSITIONS[currentStatus] || []).filter((status) =>
+        SIMULATABLE_GATEWAY_STATUSES.includes(status)
+    );
+
+const createSimulatorChargeId = (paymentId) =>
+    `sim_${String(paymentId).replace(/-/g, '').slice(0, 20)}_${Date.now().toString(36)}`;
+
+const recordGatewayEvent = async (eventId, payload) => {
+    await db.none(
+        `INSERT INTO gateway_events(event_id, payload)
+         VALUES($1, $2)
+         ON CONFLICT(event_id) DO NOTHING`,
+        [eventId, payload]
+    );
+};
+
+const ensureGatewayChargeId = async (paymentId, currentChargeId = null) => {
+    if (currentChargeId) {
+        return currentChargeId;
+    }
+
+    const chargeId = createSimulatorChargeId(paymentId);
+    await db.none(
+        `UPDATE payments
+         SET gateway_charge_id = $2,
+             updated_at = NOW()
+         WHERE id = $1`,
+        [paymentId, chargeId]
+    );
+
+    return chargeId;
+};
+
 const buildPaymentDetailsResponse = (payment, auditLog = []) => {
     const response = transformPaymentResponse(payment);
     const transformedAuditLog = auditLog.map(transformAuditEntry);
@@ -551,7 +608,7 @@ const getPaymentStatus = async (req, reply) => {
         }
         
         // Check ownership (unless admin)
-        if (req.user && req.user.role !== 'admin' && payment.user_id !== req.user.id) {
+        if (req.user && !canAccessAnyPayment(req.user) && payment.user_id !== req.user.id) {
             logger.warn({ 
                 paymentId, 
                 userId: req.user.id, 
@@ -597,7 +654,7 @@ const getPaymentAuditLog = async (req, reply) => {
         }
         
         // Check ownership (unless admin)
-        if (req.user && req.user.role !== 'admin' && payment.user_id !== req.user.id) {
+        if (req.user && !canAccessAnyPayment(req.user) && payment.user_id !== req.user.id) {
             logger.warn({ 
                 paymentId, 
                 userId: req.user.id, 
@@ -645,7 +702,7 @@ const refundPayment = async (req, reply) => {
             return sendResponse(reply, 404, { error: 'Payment not found' });
         }
 
-        if (req.user && req.user.role !== 'admin' && payment.user_id !== req.user.id) {
+        if (req.user && !canAccessAnyPayment(req.user) && payment.user_id !== req.user.id) {
             return sendResponse(reply, 403, {
                 error: 'Forbidden',
                 message: 'You do not have permission to refund this payment'
@@ -736,7 +793,7 @@ const retryPayment = async (req, reply) => {
             return sendResponse(reply, 404, { error: 'Payment not found' });
         }
 
-        if (req.user && req.user.role !== 'admin' && payment.user_id !== req.user.id) {
+        if (req.user && !canAccessAnyPayment(req.user) && payment.user_id !== req.user.id) {
             return sendResponse(reply, 403, {
                 error: 'Forbidden',
                 message: 'You do not have permission to retry this payment'
@@ -861,7 +918,7 @@ const reconcileProcessingPayment = async (req, reply) => {
             return sendResponse(reply, 404, { error: 'Payment not found' });
         }
 
-        if (req.user && req.user.role !== 'admin' && payment.user_id !== req.user.id) {
+        if (req.user && !canAccessAnyPayment(req.user) && payment.user_id !== req.user.id) {
             return sendResponse(reply, 403, {
                 error: 'Forbidden',
                 message: 'You do not have permission to reconcile this payment'
@@ -985,7 +1042,7 @@ const restartProcessingPayment = async (req, reply) => {
             return sendResponse(reply, 404, { error: 'Payment not found' });
         }
 
-        if (req.user && req.user.role !== 'admin' && payment.user_id !== req.user.id) {
+        if (req.user && !canAccessAnyPayment(req.user) && payment.user_id !== req.user.id) {
             return sendResponse(reply, 403, {
                 error: 'Forbidden',
                 message: 'You do not have permission to restart this payment'
@@ -1085,13 +1142,162 @@ const restartProcessingPayment = async (req, reply) => {
     }
 };
 
+const simulateGatewayStatus = async (req, reply) => {
+    const logger = require('../../utils/logger');
+    const statusTransition = require('../../core/status-transition/status-transition.service');
+    const { paymentId } = req.params || {};
+    const targetStatus = typeof req.body?.status === 'string' ? req.body.status.trim().toLowerCase() : '';
+    const simulationNote = typeof req.body?.note === 'string' ? req.body.note.trim() : '';
+
+    logger.info({
+        paymentId,
+        targetStatus,
+        userId: req.user?.id,
+        role: req.user?.role
+    }, 'simulateGatewayStatus: incoming request');
+
+    if (!paymentId) {
+        return sendResponse(reply, 400, { error: 'paymentId is required' });
+    }
+
+    if (!SIMULATABLE_GATEWAY_STATUSES.includes(targetStatus)) {
+        return sendResponse(reply, 400, {
+            error: 'Invalid simulator status',
+            message: `Simulator status must be one of: ${SIMULATABLE_GATEWAY_STATUSES.join(', ')}`
+        });
+    }
+
+    try {
+        const payment = await paymentOrchestrator.fetchStatus(paymentId);
+
+        if (!payment) {
+            return sendResponse(reply, 404, { error: 'Payment not found' });
+        }
+
+        if (!canAccessAnyPayment(req.user)) {
+            return sendResponse(reply, 403, {
+                error: 'Forbidden',
+                message: 'You do not have permission to use the gateway simulator'
+            });
+        }
+
+        if (payment.status === targetStatus) {
+            return sendResponse(reply, 409, {
+                error: 'Simulation not needed',
+                message: `Payment ${paymentId} is already in status "${targetStatus}".`
+            });
+        }
+
+        const allowedTargets = getSimulatableGatewayStatuses(payment.status);
+
+        if (!canTransition(payment.status, targetStatus) || !allowedTargets.includes(targetStatus)) {
+            return sendResponse(reply, 409, {
+                error: 'Simulation not allowed',
+                message: `Gateway simulator cannot move a ${payment.status} payment to ${targetStatus}.`,
+                currentStatus: payment.status,
+                allowedStatuses: allowedTargets
+            });
+        }
+
+        const chargeId = await ensureGatewayChargeId(payment.id, payment.gateway_charge_id || null);
+        const eventId = `sim_evt_${String(payment.id).replace(/-/g, '')}_${Date.now().toString(36)}`;
+        const eventType = `gateway.payment_${targetStatus}`;
+        const gatewayPayload = {
+            id: eventId,
+            type: eventType,
+            simulated: true,
+            triggeredBy: {
+                id: req.user?.id || null,
+                email: req.user?.email || null,
+                role: req.user?.role || null
+            },
+            data: {
+                object: {
+                    id: chargeId,
+                    status: targetStatus,
+                    metadata: {
+                        paymentId: payment.id,
+                        orderId: payment.order_id
+                    }
+                }
+            },
+            note: simulationNote || null,
+            createdAt: new Date().toISOString()
+        };
+
+        await recordGatewayEvent(eventId, gatewayPayload);
+
+        const transitionMetadata = {
+            action: 'gateway_simulation',
+            actorRole: req.user?.role || 'user',
+            chargeId,
+            gatewayProvider: 'simulator',
+            gatewayStatus: targetStatus,
+            simulationEventId: eventId,
+            simulationEventType: eventType,
+            simulationNote: simulationNote || null,
+            reason: simulationNote || `Gateway simulator moved this payment to ${targetStatus}.`
+        };
+
+        if (targetStatus === 'failed') {
+            transitionMetadata.failureCode = 'simulated_failure';
+            transitionMetadata.error = simulationNote || 'Gateway simulator marked this payment as failed.';
+        }
+
+        if (targetStatus === 'refunded') {
+            transitionMetadata.refundReason = simulationNote || 'Refund completed through the gateway simulator.';
+        }
+
+        const updatedPayment = await paymentOrchestrator.transitionStatus(
+            paymentId,
+            targetStatus,
+            transitionMetadata,
+            req.user?.id || null,
+            'user'
+        );
+
+        const auditLog = await statusTransition.getAuditLog(paymentId);
+        const response = buildPaymentDetailsResponse(updatedPayment, auditLog);
+
+        return sendResponse(reply, 200, {
+            ...response,
+            simulation: {
+                eventId,
+                eventType,
+                targetStatus,
+                provider: 'simulator',
+                chargeId
+            }
+        });
+    } catch (err) {
+        logger.error({
+            error: err.message,
+            stack: err.stack,
+            paymentId,
+            targetStatus,
+            userId: req.user?.id
+        }, 'simulateGatewayStatus: error caught');
+
+        if (err.name === 'StatusTransitionError' || err.name === 'InvalidTransitionError') {
+            return sendResponse(reply, 409, {
+                error: 'Simulation not allowed',
+                message: err.message
+            });
+        }
+
+        return sendResponse(reply, 500, {
+            error: 'Unable to simulate gateway status',
+            details: err.message
+        });
+    }
+};
+
 /**
  * List payments with pagination and optional status filter
  * Query params: page (default: 1), limit (default: 20, max: 100), status (optional)
  */
 const listPayments = async (req, reply) => {
     const logger = require('../../utils/logger');
-    const db = require('../../db');
     
     // Extract and validate query parameters
     const page = Math.max(1, parseInt(req.query.page) || 1);
@@ -1118,7 +1324,7 @@ const listPayments = async (req, reply) => {
         const conditions = [];
         
         // Filter by user_id unless user is admin
-        if (req.user && req.user.role !== 'admin') {
+        if (req.user && !canAccessAnyPayment(req.user)) {
             conditions.push('user_id = $' + (params.length + 1));
             params.push(req.user.id);
         }
@@ -1152,7 +1358,7 @@ const listPayments = async (req, reply) => {
             totalPages, 
             returned: payments.length,
             userId: req.user?.id,
-            isAdmin: req.user?.role === 'admin'
+            isAdmin: canAccessAnyPayment(req.user)
         }, 'listPayments: success');
         
         return sendResponse(reply, 200, {
@@ -1276,5 +1482,6 @@ module.exports = {
     refundPayment,
     retryPayment,
     reconcileProcessingPayment,
-    restartProcessingPayment
+    restartProcessingPayment,
+    simulateGatewayStatus
 };

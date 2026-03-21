@@ -283,6 +283,22 @@ describe('PaymentService Status Normalization', () => {
     });
   });
 
+  describe('simulateGatewayStatus', () => {
+    it('should call the internal simulator endpoint', async () => {
+      vi.mocked(api.post).mockResolvedValue({ ok: true });
+
+      await PaymentService.simulateGatewayStatus('pay-sim-123', {
+        status: 'succeeded',
+        note: 'Ops replay for webhook verification.',
+      });
+
+      expect(api.post).toHaveBeenCalledWith('/api/payments/pay-sim-123/simulate-gateway', {
+        status: 'succeeded',
+        note: 'Ops replay for webhook verification.',
+      });
+    });
+  });
+
   describe('retryPayment', () => {
     it('should call the retry endpoint for a failed payment', async () => {
       vi.mocked(api.post).mockResolvedValue({

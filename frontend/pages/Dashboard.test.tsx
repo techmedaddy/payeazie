@@ -117,8 +117,10 @@ describe('Dashboard', () => {
     expect(screen.getByText('Refund Snapshot')).toBeInTheDocument();
     expect(screen.getByText('Refunded Volume')).toBeInTheDocument();
     expect(screen.getByText('Net Captured')).toBeInTheDocument();
+    expect(screen.getByText('Performance Story')).toBeInTheDocument();
+    expect(screen.getByText('Success Rate')).toBeInTheDocument();
     expect(screen.getAllByText('ORD-004').length).toBeGreaterThan(0);
-    expect(screen.getByText('1 refunded payments')).toBeInTheDocument();
+    expect(screen.getAllByText('1 refunded payments').length).toBeGreaterThan(0);
   });
 
   it('shows the refunded filter option', async () => {

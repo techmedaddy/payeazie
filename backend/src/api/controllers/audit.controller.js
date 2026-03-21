@@ -1,5 +1,6 @@
 const paymentAuditModel = require('../../db/models/payment_audit.model');
 const logger = require('../../utils/logger');
+const { canAccessAnyPayment } = require('../../utils/roles');
 
 /**
  * Get audit logs for the authenticated user's payments
@@ -33,7 +34,7 @@ const getAuditLogs = async (request, reply) => {
         let logs, totalCount;
 
         // Admin users can see all audit logs
-        if (user.role === 'admin') {
+        if (canAccessAnyPayment(user)) {
             // Filter by user_id if provided in query
             const filterUserId = request.query.user_id;
             
@@ -122,7 +123,7 @@ const getPaymentAuditLogs = async (request, reply) => {
         }
 
         // Check authorization (unless admin)
-        if (user.role !== 'admin') {
+        if (!canAccessAnyPayment(user)) {
             // Verify the payment belongs to the user
             const firstLog = logs[0];
             if (firstLog.user_id && firstLog.user_id !== user.id) {

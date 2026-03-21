@@ -2,6 +2,7 @@ const db = require('../../db');
 const logger = require('../../utils/logger');
 const Redis = require('ioredis');
 const { ALLOWED_TRANSITIONS, canTransition } = require('../../utils/payment-status');
+const { isInternalOperatorRole } = require('../../utils/roles');
 
 const redisUrl = process.env.REDIS_URL;
 if (!redisUrl) {
@@ -85,7 +86,7 @@ const emitStatusEvent = async (paymentId, fromStatus, toStatus, metadata = {}) =
 
 const classifyOperationSource = (triggeredBy, actorRole = null) => {
     if (triggeredBy === 'user') {
-        return actorRole === 'admin'
+        return isInternalOperatorRole(actorRole)
             ? OPERATION_SOURCE.ADMIN_TRIGGERED
             : OPERATION_SOURCE.USER_TRIGGERED;
     }

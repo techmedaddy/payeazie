@@ -173,6 +173,18 @@ export const PaymentService = {
     }
   },
 
+  simulateGatewayStatus: async (
+    paymentId: string,
+    payload: { status: 'processing' | 'succeeded' | 'failed' | 'refunded'; note?: string }
+  ): Promise<any> => {
+    try {
+      return await api.post<any>(`/api/payments/${paymentId}/simulate-gateway`, payload);
+    } catch (err) {
+      console.error(`PaymentService.simulateGatewayStatus failed for id=${paymentId}`, err);
+      throw err;
+    }
+  },
+
   /**
    * Get audit log for a payment
    */

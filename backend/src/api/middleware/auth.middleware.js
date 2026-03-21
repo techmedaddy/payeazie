@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const logger = require('../../utils/logger');
 const UserModel = require('../../db/models/user.model');
+const { canAccessAnyPayment } = require('../../utils/roles');
 
 /**
  * JWT Authentication Middleware
@@ -148,7 +149,24 @@ async function optionalAuthMiddleware(req, reply) {
   }
 }
 
+async function requireInternalOperator(req, reply) {
+  if (!req.user || !canAccessAnyPayment(req.user)) {
+    logger.warn({
+      userId: req.user?.id || null,
+      role: req.user?.role || null,
+      path: req.url,
+      method: req.method,
+    }, '❌ Forbidden - Internal operator access required');
+
+    return reply.code(403).send({
+      error: 'Forbidden',
+      message: 'This action is only available to internal admin or ops users'
+    });
+  }
+}
+
 module.exports = {
   authMiddleware,
-  optionalAuthMiddleware
+  optionalAuthMiddleware,
+  requireInternalOperator
 };

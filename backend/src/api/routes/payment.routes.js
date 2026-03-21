@@ -1,7 +1,7 @@
 const paymentController = require('../controllers/payment.controller');
 const webhookController = require('../controllers/webhook.controller');
 const sseController = require('../controllers/sse.controller');
-const { authMiddleware } = require('../middleware/auth.middleware');
+const { authMiddleware, requireInternalOperator } = require('../middleware/auth.middleware');
 const { ALL_STATUSES } = require('../../utils/payment-status');
 
 const isDevelopment = process.env.NODE_ENV !== 'production';
@@ -130,6 +130,28 @@ const restartProcessingSchema = {
     properties: {
       paymentId: { type: 'string', minLength: 1 }
     }
+  }
+};
+
+const simulateGatewayStatusSchema = {
+  params: {
+    type: 'object',
+    required: ['paymentId'],
+    properties: {
+      paymentId: { type: 'string', minLength: 1 }
+    }
+  },
+  body: {
+    type: 'object',
+    required: ['status'],
+    properties: {
+      status: {
+        type: 'string',
+        enum: ['processing', 'succeeded', 'failed', 'refunded']
+      },
+      note: { type: 'string', maxLength: 280 }
+    },
+    additionalProperties: false
   }
 };
 
@@ -265,6 +287,16 @@ module.exports = async function paymentRoutes(fastify) {
     },
     paymentController.restartProcessingPayment
   );
+
+  fastify.post(
+    '/payments/:paymentId/simulate-gateway',
+    {
+      schema: simulateGatewayStatusSchema,
+      preHandler: [authMiddleware, requireInternalOperator],
+      config: { rateLimit: createPaymentRateLimit }
+    },
+    paymentController.simulateGatewayStatus
+  );
   
   // Create new payment (simplified)
   fastify.post(
@@ -307,7 +339,9 @@ module.exports = async function paymentRoutes(fastify) {
   );
 
   // Manual reconciliation trigger endpoint (useful for testing/debugging)
-  fastify.post('/payments/reconcile', async (request, reply) => {
+  fastify.post('/payments/reconcile', {
+    preHandler: [authMiddleware, requireInternalOperator]
+  }, async (request, reply) => {
     try {
       await queueClient.add('payment_reconcile', 'reconcile.manual', {}, {
         removeOnComplete: true,

@@ -26,6 +26,7 @@ import { Link } from 'react-router-dom';
 import StatusBadge from '../components/ui/StatusBadge';
 import { PaymentService } from '../services/payments';
 import { PaymentResponse, PaymentStatus } from '../types';
+import { buildPaymentMetricsStory, formatDurationShort, formatPercent } from '../utils/paymentMetrics';
 import { cn } from '../utils/cn';
 
 const DASHBOARD_PAGE_LIMIT = 100;
@@ -187,6 +188,8 @@ const Dashboard: React.FC = () => {
       stuck: stuckPayments.length,
     };
   }, [filteredPayments]);
+
+  const metricsStory = useMemo(() => buildPaymentMetricsStory(filteredPayments), [filteredPayments]);
 
   const recentActivity = useMemo(
     () =>
@@ -552,6 +555,50 @@ const Dashboard: React.FC = () => {
           />
         </div>
       )}
+
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="max-w-2xl">
+            <p className="text-sm font-semibold uppercase tracking-wide text-slate-500">Performance Story</p>
+            <h2 className="mt-1 text-xl font-bold text-slate-900">{metricsStory.headline}</h2>
+            <p className="mt-2 text-sm text-slate-600">{metricsStory.narrative}</p>
+          </div>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {[
+              {
+                label: 'Success Rate',
+                value: formatPercent(metricsStory.successRate),
+                helper: `${metricsStory.successfulOutcomes} successful outcomes`,
+                tone: 'text-emerald-700 bg-emerald-50 border-emerald-200',
+              },
+              {
+                label: 'Failure Rate',
+                value: formatPercent(metricsStory.failureRate),
+                helper: `${metricsStory.failedOutcomes} failed outcomes`,
+                tone: 'text-red-700 bg-red-50 border-red-200',
+              },
+              {
+                label: 'Refund Rate',
+                value: formatPercent(metricsStory.refundRate),
+                helper: `${metricsStory.refundedOutcomes} refunded payments`,
+                tone: 'text-orange-700 bg-orange-50 border-orange-200',
+              },
+              {
+                label: 'Avg Latency',
+                value: formatDurationShort(metricsStory.averageResolutionMs),
+                helper: 'Created to final status',
+                tone: 'text-sky-700 bg-sky-50 border-sky-200',
+              },
+            ].map((metric) => (
+              <div key={metric.label} className={cn('rounded-xl border p-4', metric.tone)}>
+                <p className="text-xs font-semibold uppercase tracking-wide">{metric.label}</p>
+                <p className="mt-2 text-2xl font-bold">{metric.value}</p>
+                <p className="mt-1 text-xs font-medium">{metric.helper}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm lg:col-span-2">

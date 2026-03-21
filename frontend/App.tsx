@@ -5,6 +5,7 @@ import Dashboard from './pages/Dashboard';
 import CreatePayment from './pages/CreatePayment';
 import PaymentDetails from './pages/PaymentDetails';
 import Account from './pages/Account';
+import OpsDashboard from './pages/OpsDashboard';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import ForgotPassword from './pages/ForgotPassword';
@@ -103,6 +104,11 @@ const App: React.FC = () => {
               <Route path="/account" element={
                 <ProtectedRoute>
                   <Layout><Account /></Layout>
+                </ProtectedRoute>
+              } />
+              <Route path="/ops" element={
+                <ProtectedRoute allowedRoles={['admin', 'ops']}>
+                  <Layout><OpsDashboard /></Layout>
                 </ProtectedRoute>
               } />
               <Route path="/payment/:id" element={
