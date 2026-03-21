@@ -196,6 +196,13 @@ The application now treats operations support as part of the normal flow, not as
 | Restart | Move a stuck processing payment back into the queue path | Used for stuck `processing` records that need to be requeued |
 | Simulate gateway status | Trigger controlled internal state changes | Internal-only, valid next statuses only |
 
+<img width="1913" height="987" alt="image" src="https://github.com/user-attachments/assets/fb7a6b03-ea33-476f-bc4d-8b1b44389ea2" />
+<img width="1913" height="987" alt="image" src="https://github.com/user-attachments/assets/1f265e4a-43c6-4078-b41b-b90480ba3643" />
+<img width="1913" height="987" alt="image" src="https://github.com/user-attachments/assets/ea10a429-60a3-4497-9cf4-6a0941eaae72" />
+
+
+
+
 ## Payment Recovery Flow
 
 ```mermaid
@@ -281,6 +288,11 @@ At a high level, the backend revolves around a few core entities:
   Tracks incoming or simulated gateway events used for reconciliation and webhook handling.
 - `users`
   Stores login identity, password hash or OAuth-linked account details, and role.
+
+  <img width="1913" height="987" alt="image" src="https://github.com/user-attachments/assets/b0c3329e-b06f-4ec1-af76-4a74b620ef0f" />
+  <img width="1913" height="987" alt="image" src="https://github.com/user-attachments/assets/6d0d608f-0523-40aa-9799-4adc0aaee453" />
+  <img width="1913" height="987" alt="image" src="https://github.com/user-attachments/assets/8c473cc7-c6a0-48ab-9cca-cbba27008f3c" />
+
 
 ### Request handling pattern
 
@@ -444,6 +456,9 @@ The frontend now tells a more complete story than simple counts:
 - average processing latency
 
 These are calculated from available payment data rather than inferred from gateway internals that do not exist in the current implementation.
+<img width="1913" height="987" alt="image" src="https://github.com/user-attachments/assets/3b40fb3e-1357-4f5b-8aa8-b69adbdd0ae3" />
+<img width="1913" height="987" alt="image" src="https://github.com/user-attachments/assets/8da4b355-4ddd-42af-9704-669bd33a455d" />
+
 
 ## Running The Project Locally
 
