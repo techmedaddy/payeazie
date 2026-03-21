@@ -84,6 +84,27 @@ describe('PaymentService Status Normalization', () => {
       expect(result.status).toBe(PaymentStatus.FAILED);
     });
 
+    it('should handle "refunded" status from backend', async () => {
+      const mockBackendResponse = {
+        id: 'pay-refund-123',
+        orderId: 'ORD-REFUND-123',
+        amount: 1500,
+        currency: 'USD',
+        status: 'refunded',
+        createdAt: '2026-01-07T10:00:00Z',
+        updatedAt: '2026-01-07T10:10:00Z',
+      };
+
+      vi.mocked(api.post).mockResolvedValue(mockBackendResponse);
+
+      const result = await PaymentService.createPaymentIntent(
+        { orderId: 'ORD-REFUND-123', amount: 1500, currency: 'USD' },
+        'key-refund-123'
+      );
+
+      expect(result.status).toBe(PaymentStatus.REFUNDED);
+    });
+
     it('should default to PENDING for missing status', async () => {
       const mockBackendResponse = {
         id: 'pay-000',
@@ -179,6 +200,7 @@ describe('PaymentService Status Normalization', () => {
         { backend: 'processing', expected: PaymentStatus.PROCESSING },
         { backend: 'succeeded', expected: PaymentStatus.SUCCEEDED },
         { backend: 'failed', expected: PaymentStatus.FAILED },
+        { backend: 'refunded', expected: PaymentStatus.REFUNDED },
         { backend: 'PENDING', expected: PaymentStatus.PENDING }, // already uppercase
         { backend: 'ProCessinG', expected: PaymentStatus.PROCESSING }, // mixed case
       ];
@@ -240,6 +262,24 @@ describe('PaymentService Status Normalization', () => {
 
       expect(result.orderId).toBe('ORD-FALLBACK');
       expect(result.createdAt).toBe('2026-01-07T10:00:00Z');
+    });
+  });
+
+  describe('refundPayment', () => {
+    it('should call the refund endpoint for a payment', async () => {
+      const mockRefundResponse = {
+        id: 'pay-refund-456',
+        status: 'refunded',
+      };
+
+      vi.mocked(api.post).mockResolvedValue(mockRefundResponse);
+
+      const result = await PaymentService.refundPayment('pay-refund-456', 'Customer requested a duplicate charge reversal.');
+
+      expect(api.post).toHaveBeenCalledWith('/api/payments/pay-refund-456/refund', {
+        reason: 'Customer requested a duplicate charge reversal.',
+      });
+      expect(result).toEqual(mockRefundResponse);
     });
   });
 });

@@ -28,6 +28,12 @@ describe('StatusBadge Component', () => {
       expect(screen.getByText('Failed')).toBeInTheDocument();
       expect(screen.getByRole('status')).toHaveAttribute('aria-label', 'Payment status: Failed');
     });
+
+    it('should render REFUNDED status correctly', () => {
+      render(<StatusBadge status={PaymentStatus.REFUNDED} />);
+      expect(screen.getByText('Refunded')).toBeInTheDocument();
+      expect(screen.getByRole('status')).toHaveAttribute('aria-label', 'Payment status: Refunded');
+    });
   });
 
   describe('Fallback Handling', () => {
@@ -105,6 +111,12 @@ describe('StatusBadge Component', () => {
       const { container } = render(<StatusBadge status={PaymentStatus.FAILED} />);
       const badge = container.querySelector('[role="status"]');
       expect(badge).toHaveClass('bg-red-50', 'text-red-700', 'border-red-200');
+    });
+
+    it('should apply refund styling for REFUNDED', () => {
+      const { container } = render(<StatusBadge status={PaymentStatus.REFUNDED} />);
+      const badge = container.querySelector('[role="status"]');
+      expect(badge).toHaveClass('bg-orange-50', 'text-orange-700', 'border-orange-200');
     });
 
     it('should apply warning styling for Unknown', () => {

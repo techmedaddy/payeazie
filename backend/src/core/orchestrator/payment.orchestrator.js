@@ -1,13 +1,7 @@
 const db = require('../../db');
 const logger = require('../../utils/logger');
 const statusTransitionService = require('../status-transition/status-transition.service');
-
-const ALLOWED_TRANSITIONS = {
-    pending: new Set(['processing', 'failed']),
-    processing: new Set(['succeeded', 'failed']),
-    succeeded: new Set([]),
-    failed: new Set([])
-};
+const { canTransition } = require('../../utils/payment-status');
 
 class InvalidTransitionError extends Error {
     constructor(message) {
@@ -22,17 +16,6 @@ class NotFoundError extends Error {
         this.name = 'NotFoundError';
     }
 }
-
-const canTransition = (current, next) => {
-    if (!current || !next) {
-        return false;
-    }
-    if (current === next) {
-        return true;
-    }
-    const allowed = ALLOWED_TRANSITIONS[current];
-    return allowed ? allowed.has(next) : false;
-};
 
 const fetchPaymentForUpdate = (t, paymentId) =>
     t.oneOrNone('SELECT * FROM payments WHERE id = $1 FOR UPDATE', [paymentId]);

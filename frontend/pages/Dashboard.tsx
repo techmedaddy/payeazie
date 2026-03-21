@@ -4,11 +4,11 @@ import {
   AlertCircle,
   CalendarRange,
   CheckCircle,
-  Clock,
   DollarSign,
   Filter,
   Loader2,
   RefreshCw,
+  RotateCcw,
   Search,
   X,
 } from 'lucide-react';
@@ -47,19 +47,28 @@ const fetchDashboardPayments = async (): Promise<PaymentResponse[]> => {
   return allResults;
 };
 
-const StatCard: React.FC<{ title: string; value: string; icon: React.ReactNode; helper?: string }> = ({
+const StatCard: React.FC<{
+  title: string;
+  value: string;
+  icon: React.ReactNode;
+  helper?: string;
+  className?: string;
+  iconClassName?: string;
+}> = ({
   title,
   value,
   icon,
   helper,
+  className,
+  iconClassName,
 }) => (
-  <div className="flex items-start justify-between rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+  <div className={cn('flex items-start justify-between rounded-xl border border-slate-200 bg-white p-6 shadow-sm', className)}>
     <div>
       <p className="text-sm font-medium text-slate-500">{title}</p>
       <h3 className="mt-2 text-2xl font-bold text-slate-900">{value}</h3>
       {helper && <p className="mt-1 text-xs font-medium text-slate-500">{helper}</p>}
     </div>
-    <div className="rounded-lg bg-brand-50 p-3 text-brand-600">{icon}</div>
+    <div className={cn('rounded-lg bg-brand-50 p-3 text-brand-600', iconClassName)}>{icon}</div>
   </div>
 );
 
@@ -147,17 +156,28 @@ const Dashboard: React.FC = () => {
 
   const stats = useMemo(() => {
     const totalVolume = filteredPayments.reduce((sum, payment) => sum + Number(payment.amount), 0);
+    const succeededPayments = filteredPayments.filter((payment) => payment.status === PaymentStatus.SUCCEEDED);
+    const refundedPayments = filteredPayments.filter((payment) => payment.status === PaymentStatus.REFUNDED);
     const processingPayments = filteredPayments.filter(
       (payment) => payment.status === PaymentStatus.PROCESSING
     );
     const stuckPayments = processingPayments.filter(
       (payment) => Date.now() - new Date(payment.updatedAt).getTime() >= STUCK_THRESHOLD_MS
     );
+    const succeededVolume = succeededPayments.reduce((sum, payment) => sum + Number(payment.amount), 0);
+    const refundedVolume = refundedPayments.reduce((sum, payment) => sum + Number(payment.amount), 0);
+    const completedRecoverableCount = succeededPayments.length + refundedPayments.length;
+    const refundRate = completedRecoverableCount > 0 ? (refundedPayments.length / completedRecoverableCount) * 100 : 0;
 
     return {
       totalVolume,
-      succeeded: filteredPayments.filter((payment) => payment.status === PaymentStatus.SUCCEEDED).length,
+      succeeded: succeededPayments.length,
       failed: filteredPayments.filter((payment) => payment.status === PaymentStatus.FAILED).length,
+      refunded: refundedPayments.length,
+      refundedVolume,
+      succeededVolume,
+      netCapturedVolume: succeededVolume - refundedVolume,
+      refundRate,
       processing: processingPayments.length,
       stuck: stuckPayments.length,
     };
@@ -175,7 +195,7 @@ const Dashboard: React.FC = () => {
   );
 
   const chartData = useMemo(() => {
-    const groupedByDay = filteredPayments.reduce<Record<string, { date: string; label: string; succeeded: number; failed: number; processing: number }>>(
+    const groupedByDay = filteredPayments.reduce<Record<string, { date: string; label: string; succeeded: number; failed: number; refunded: number; processing: number }>>(
       (accumulator, payment) => {
         const date = new Date(payment.createdAt);
         const dateKey = date.toISOString().slice(0, 10);
@@ -187,6 +207,7 @@ const Dashboard: React.FC = () => {
             label,
             succeeded: 0,
             failed: 0,
+            refunded: 0,
             processing: 0,
           };
         }
@@ -194,6 +215,7 @@ const Dashboard: React.FC = () => {
         const amount = Number(payment.amount);
         if (payment.status === PaymentStatus.SUCCEEDED) accumulator[dateKey].succeeded += amount;
         else if (payment.status === PaymentStatus.FAILED) accumulator[dateKey].failed += amount;
+        else if (payment.status === PaymentStatus.REFUNDED) accumulator[dateKey].refunded += amount;
         else if (payment.status === PaymentStatus.PROCESSING) accumulator[dateKey].processing += amount;
 
         return accumulator;
@@ -325,7 +347,7 @@ const Dashboard: React.FC = () => {
         </div>
 
         <div className="mt-4 flex flex-wrap items-center gap-2">
-          {['all', 'pending', 'processing', 'succeeded', 'failed'].map((filter) => (
+          {['all', 'pending', 'processing', 'succeeded', 'failed', 'refunded'].map((filter) => (
             <button
               key={filter}
               onClick={() => setStatusFilter(filter)}
@@ -342,17 +364,49 @@ const Dashboard: React.FC = () => {
         </div>
       </div>
 
+      {stats.refunded > 0 && (
+        <div className="rounded-2xl border border-orange-200 bg-gradient-to-r from-orange-50 via-amber-50 to-white p-5 shadow-sm">
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-wide text-orange-700">Refund Snapshot</p>
+              <h2 className="mt-1 text-xl font-bold text-slate-900">
+                {stats.refunded} refunded payment{stats.refunded === 1 ? '' : 's'} returned {formatCurrency(stats.refundedVolume)}
+              </h2>
+              <p className="mt-1 text-sm text-slate-600">
+                Net captured volume is {formatCurrency(stats.netCapturedVolume)} across the current filters.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2 text-sm">
+              <span className="rounded-full border border-orange-200 bg-white px-3 py-1.5 font-medium text-orange-700">
+                Refund rate {stats.refundRate.toFixed(0)}%
+              </span>
+              <span className="rounded-full border border-orange-200 bg-white px-3 py-1.5 font-medium text-slate-700">
+                Refunded volume {formatCurrency(stats.refundedVolume)}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
         <StatCard
-          title="Filtered Volume"
+          title="Gross Volume"
           value={formatCurrency(stats.totalVolume)}
           helper={`${filteredPayments.length} matching payments`}
           icon={<DollarSign className="h-5 w-5" />}
         />
         <StatCard
+          title="Net Captured"
+          value={formatCurrency(stats.netCapturedVolume)}
+          helper="Succeeded volume minus refunded volume"
+          icon={<DollarSign className="h-5 w-5" />}
+          className="border-emerald-200 bg-emerald-50/40"
+          iconClassName="bg-emerald-100 text-emerald-700"
+        />
+        <StatCard
           title="Successful Payments"
           value={stats.succeeded.toString()}
-          helper="Within current filters"
+          helper={`${formatCurrency(stats.succeededVolume)} captured`}
           icon={<CheckCircle className="h-5 w-5" />}
         />
         <StatCard
@@ -364,16 +418,31 @@ const Dashboard: React.FC = () => {
         <StatCard
           title="Processing Queue"
           value={stats.processing.toString()}
-          helper="Within current filters"
+          helper={stats.processing > 0 ? `${stats.stuck} likely stuck` : 'No active processing payments'}
           icon={<Activity className="h-5 w-5" />}
         />
-        <StatCard
-          title="Likely Stuck"
-          value={stats.stuck.toString()}
-          helper="Processing for more than 1 minute"
-          icon={<Clock className="h-5 w-5" />}
-        />
       </div>
+
+      {stats.refunded > 0 && (
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <StatCard
+            title="Refunded Payments"
+            value={stats.refunded.toString()}
+            helper={`${stats.refundRate.toFixed(0)}% of refundable outcomes`}
+            icon={<RotateCcw className="h-5 w-5" />}
+            className="border-orange-200 bg-orange-50/50"
+            iconClassName="bg-orange-100 text-orange-700"
+          />
+          <StatCard
+            title="Refunded Volume"
+            value={formatCurrency(stats.refundedVolume)}
+            helper="Funds returned to customers"
+            icon={<RotateCcw className="h-5 w-5" />}
+            className="border-orange-200 bg-orange-50/50"
+            iconClassName="bg-orange-100 text-orange-700"
+          />
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm lg:col-span-2">
@@ -416,6 +485,7 @@ const Dashboard: React.FC = () => {
                   <Legend />
                   <Bar dataKey="succeeded" fill="#10b981" name="Succeeded" radius={[4, 4, 0, 0]} />
                   <Bar dataKey="failed" fill="#ef4444" name="Failed" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="refunded" fill="#f97316" name="Refunded" radius={[4, 4, 0, 0]} />
                   <Bar dataKey="processing" fill="#f59e0b" name="Processing" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
@@ -470,6 +540,16 @@ const Dashboard: React.FC = () => {
                 {stats.processing} processing, {stats.stuck} likely stuck
               </p>
             </div>
+            <div>
+              <p className="text-slate-500">Refunded</p>
+              <p className="font-medium text-slate-900">{stats.refunded} refunded payments</p>
+            </div>
+            <div>
+              <p className="text-slate-500">Refunded volume / Net captured</p>
+              <p className="font-medium text-slate-900">
+                {formatCurrency(stats.refundedVolume)} refunded, {formatCurrency(stats.netCapturedVolume)} net
+              </p>
+            </div>
           </div>
         </div>
 
@@ -498,12 +578,18 @@ const Dashboard: React.FC = () => {
                 const ageMs = Date.now() - new Date(payment.updatedAt).getTime();
                 const isLikelyStuck =
                   payment.status === PaymentStatus.PROCESSING && ageMs >= STUCK_THRESHOLD_MS;
+                const isRefundedPayment = payment.status === PaymentStatus.REFUNDED;
 
                 return (
                   <Link
                     key={payment.id}
                     to={`/payment/${payment.id}`}
-                    className="block rounded-lg border border-slate-200 p-3 transition-colors hover:bg-slate-50"
+                    className={cn(
+                      'block rounded-lg border p-3 transition-colors',
+                      isRefundedPayment
+                        ? 'border-orange-200 bg-orange-50/60 hover:bg-orange-50'
+                        : 'border-slate-200 hover:bg-slate-50'
+                    )}
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
@@ -515,6 +601,11 @@ const Dashboard: React.FC = () => {
                       </div>
                       <div className="flex shrink-0 flex-col items-end gap-2">
                         <StatusBadge status={payment.status} size="sm" showIcon={true} />
+                        {isRefundedPayment && (
+                          <span className="rounded-full bg-orange-100 px-2 py-0.5 text-[11px] font-medium text-orange-700">
+                            Funds returned
+                          </span>
+                        )}
                         {isLikelyStuck && (
                           <span className="rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-medium text-red-700">
                             Stuck
@@ -588,16 +679,31 @@ const Dashboard: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {filteredPayments.slice(0, 20).map((payment) => (
-                    <tr key={payment.id} className="transition-colors hover:bg-slate-50">
+                  {filteredPayments.slice(0, 20).map((payment) => {
+                    const isRefundedPayment = payment.status === PaymentStatus.REFUNDED;
+
+                    return (
+                    <tr
+                      key={payment.id}
+                      className={cn(
+                        'transition-colors',
+                        isRefundedPayment ? 'bg-orange-50/40 hover:bg-orange-50' : 'hover:bg-slate-50'
+                      )}
+                    >
                       <td className="py-3 text-sm font-mono text-slate-700">{payment.orderId}</td>
                       <td className="py-3 text-sm font-mono text-slate-500">{payment.id.slice(0, 8)}...</td>
                       <td className="py-3 text-sm font-semibold text-slate-900">
                         {formatCurrency(Number(payment.amount))}
+                        {isRefundedPayment && (
+                          <div className="mt-1 text-xs font-medium text-orange-700">Returned to customer</div>
+                        )}
                       </td>
                       <td className="py-3 text-sm text-slate-600">{payment.currency}</td>
                       <td className="py-3">
                         <StatusBadge status={payment.status} size="sm" showIcon={true} />
+                        {isRefundedPayment && (
+                          <div className="mt-1 text-xs font-medium text-orange-700">Refund completed</div>
+                        )}
                         {payment.status === PaymentStatus.PROCESSING &&
                           Date.now() - new Date(payment.updatedAt).getTime() >= STUCK_THRESHOLD_MS && (
                             <div className="mt-1 text-xs font-medium text-red-600">Likely stuck</div>
@@ -615,7 +721,7 @@ const Dashboard: React.FC = () => {
                         </Link>
                       </td>
                     </tr>
-                  ))}
+                  )})}
                 </tbody>
               </table>
             </div>

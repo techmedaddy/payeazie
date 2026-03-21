@@ -6,6 +6,10 @@ const logger = require('../utils/logger');
 const gatewayClient = require('../utils/gateway-client');
 const metrics = require('../utils/metrics');
 const statusTransition = require('../core/status-transition/status-transition.service');
+const {
+    FINAL_STATUSES,
+    canTransition
+} = require('../utils/payment-status');
 
 /**
  * Sleep helper for demo purposes
@@ -14,24 +18,6 @@ const statusTransition = require('../core/status-transition/status-transition.se
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 const DEFAULT_WINDOW_MINUTES = 30;
-const FINAL_STATUSES = new Set(['succeeded', 'failed', 'refunded']);
-
-/**
- * Valid status transitions
- * Prevents invalid state changes
- */
-const VALID_TRANSITIONS = {
-    'processing': ['succeeded', 'failed', 'processing'],
-    'succeeded': ['refunded'],
-    'failed': ['refunded'],
-    'refunded': []
-};
-
-const canTransition = (currentStatus, newStatus) => {
-    if (currentStatus === newStatus) return false; // No change needed
-    const allowed = VALID_TRANSITIONS[currentStatus];
-    return allowed && allowed.includes(newStatus);
-};
 
 /**
  * Fetch payments that are not in a final status and have a gateway charge ID
@@ -98,7 +84,7 @@ const reconcilePayment = async (payment, jobId = null) => {
         }
 
         // Skip if both are in final states (edge case)
-        if (FINAL_STATUSES.has(payment.status) && FINAL_STATUSES.has(remote.status)) {
+        if (FINAL_STATUSES.includes(payment.status) && FINAL_STATUSES.includes(remote.status)) {
             logger.debug({ 
                 paymentId: payment.id,
                 currentStatus: payment.status,

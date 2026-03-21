@@ -3,6 +3,12 @@ require('dotenv').config();
 const idempotencyService = require('../../core/idempotency/idempotency.service');
 const paymentOrchestrator = require('../../core/orchestrator/payment.orchestrator');
 const metrics = require('../../utils/metrics');
+const gatewayClient = require('../../utils/gateway-client');
+const {
+    ALL_STATUSES,
+    REFUNDABLE_STATUSES,
+    canBeRefunded
+} = require('../../utils/payment-status');
 
 const sendResponse = (reply, statusCode, payload) => reply.code(statusCode).send(payload);
 const VALID_DEMO_OUTCOMES = new Set(['auto', 'success', 'failure']);
@@ -39,6 +45,12 @@ const getAuditSummary = (entry, metadata = {}) => {
         return metadata.error || metadata.reason || 'Payment processing failed.';
     }
 
+    if (entry.to_status === 'refunded') {
+        return metadata.refundReason
+            ? `Refund requested: ${metadata.refundReason}`
+            : 'Payment was refunded and funds were returned to the customer.';
+    }
+
     if (entry.to_status === 'pending') {
         return 'Payment intent was created and queued for processing.';
     }
@@ -70,6 +82,7 @@ const transformAuditEntry = (entry) => {
         gatewayStatus: metadata.gatewayStatus || entry.to_status,
         failureCode: metadata.failureCode || null,
         failureReason: metadata.error || null,
+        refundReason: metadata.refundReason || null,
         summary: getAuditSummary(entry, metadata),
         metadata
     };
@@ -81,6 +94,8 @@ const buildPaymentDetailsResponse = (payment, auditLog = []) => {
     const latestActivity = transformedAuditLog[transformedAuditLog.length - 1] || null;
     const latestFailure = [...transformedAuditLog].reverse().find((entry) => entry.toStatus === 'failed') || null;
     const processingEvent = transformedAuditLog.find((entry) => entry.toStatus === 'processing') || null;
+    const latestRefund = [...transformedAuditLog].reverse().find((entry) => entry.toStatus === 'refunded') || null;
+    const refundEligible = canBeRefunded(response.status);
 
     return {
         ...response,
@@ -106,6 +121,24 @@ const buildPaymentDetailsResponse = (payment, auditLog = []) => {
                 chargeId: latestFailure.chargeId
             }
             : null,
+        refundDetails: latestRefund
+            ? {
+                reason: latestRefund.refundReason || latestRefund.summary,
+                refundedAt: latestRefund.createdAt,
+                worker: latestRefund.worker,
+                jobId: latestRefund.jobId,
+                chargeId: latestRefund.chargeId,
+                gatewayStatus: latestRefund.gatewayStatus,
+                triggeredBy: latestRefund.triggeredBy,
+                actor: latestRefund.actor
+            }
+            : null,
+        refund: {
+            eligible: refundEligible,
+            state: latestRefund ? 'refunded' : refundEligible ? 'eligible' : 'not_eligible',
+            refundableStatuses: REFUNDABLE_STATUSES,
+            refundedAt: latestRefund?.createdAt || null
+        },
         latestActivity: latestActivity
             ? {
                 summary: latestActivity.summary,
@@ -342,6 +375,104 @@ const getPaymentAuditLog = async (req, reply) => {
     }
 };
 
+const refundPayment = async (req, reply) => {
+    const logger = require('../../utils/logger');
+    const statusTransition = require('../../core/status-transition/status-transition.service');
+    const { paymentId } = req.params || {};
+    const refundReason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
+
+    logger.info({ paymentId, userId: req.user?.id }, 'refundPayment: incoming request');
+
+    if (!paymentId) {
+        return sendResponse(reply, 400, { error: 'paymentId is required' });
+    }
+
+    if (!refundReason || refundReason.length < 5) {
+        return sendResponse(reply, 400, {
+            error: 'Refund reason is required',
+            message: 'Provide a refund reason with at least 5 characters.'
+        });
+    }
+
+    try {
+        const payment = await paymentOrchestrator.fetchStatus(paymentId);
+
+        if (!payment) {
+            return sendResponse(reply, 404, { error: 'Payment not found' });
+        }
+
+        if (req.user && req.user.role !== 'admin' && payment.user_id !== req.user.id) {
+            return sendResponse(reply, 403, {
+                error: 'Forbidden',
+                message: 'You do not have permission to refund this payment'
+            });
+        }
+
+        if (!canBeRefunded(payment.status)) {
+            return sendResponse(reply, 409, {
+                error: 'Refund not allowed',
+                message: `Payments in status "${payment.status}" cannot be refunded`,
+                currentStatus: payment.status,
+                refundableStatuses: REFUNDABLE_STATUSES
+            });
+        }
+
+        if (!payment.gateway_charge_id) {
+            return sendResponse(reply, 409, {
+                error: 'Refund not available',
+                message: 'This payment does not have a gateway charge to refund'
+            });
+        }
+
+        const gatewayRefund = await gatewayClient.refund(payment.gateway_charge_id);
+
+        const updatedPayment = await paymentOrchestrator.transitionStatus(
+            paymentId,
+            'refunded',
+            {
+                chargeId: payment.gateway_charge_id,
+                refundId: gatewayRefund.refundId,
+                gatewayProvider: gatewayRefund.provider || 'mock',
+                gatewayStatus: gatewayRefund.status,
+                refundReason,
+                reason: `Refund requested by ${req.user?.email || req.user?.id || 'user'}.`
+            },
+            req.user?.id || null,
+            'user'
+        );
+
+        const auditLog = await statusTransition.getAuditLog(paymentId);
+        const response = buildPaymentDetailsResponse(updatedPayment, auditLog);
+
+        logger.info({
+            paymentId,
+            userId: req.user?.id,
+            refundId: gatewayRefund.refundId
+        }, 'refundPayment: success');
+
+        return sendResponse(reply, 200, response);
+    } catch (err) {
+        logger.error({
+            error: err.message,
+            stack: err.stack,
+            paymentId,
+            userId: req.user?.id
+        }, 'refundPayment: error caught');
+
+        if (err.name === 'StatusTransitionError' || err.name === 'InvalidTransitionError') {
+            return sendResponse(reply, 409, {
+                error: 'Refund not allowed',
+                message: err.message
+            });
+        }
+
+        return sendResponse(reply, 500, {
+            error: 'Unable to refund payment',
+            details: err.message
+        });
+    }
+};
+
 /**
  * List payments with pagination and optional status filter
  * Query params: page (default: 1), limit (default: 20, max: 100), status (optional)
@@ -359,7 +490,7 @@ const listPayments = async (req, reply) => {
     logger.info({ page, limit, status }, 'listPayments: incoming request');
     
     // Validate status filter if provided
-    const validStatuses = ['pending', 'processing', 'succeeded', 'failed', 'refunded'];
+    const validStatuses = ALL_STATUSES;
     if (status && !validStatuses.includes(status)) {
         return sendResponse(reply, 400, { 
             error: 'Invalid status filter',
@@ -529,5 +660,6 @@ module.exports = {
     createPayment,
     getPaymentStatus,
     getPaymentAuditLog,
-    listPayments
+    listPayments,
+    refundPayment
 };

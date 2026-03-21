@@ -81,8 +81,8 @@ describe('reconcile.worker', () => {
         vi.clearAllMocks();
         
         // Load the worker module to get the processor function
-        delete require.cache[require.resolve('../../reconcile.worker')];
-        require('../../reconcile.worker');
+        delete require.cache[require.resolve('../reconcile.worker')];
+        require('../reconcile.worker');
         workerProcessor = mockQueue._processor;
     });
 

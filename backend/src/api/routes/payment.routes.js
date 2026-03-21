@@ -2,6 +2,7 @@ const paymentController = require('../controllers/payment.controller');
 const webhookController = require('../controllers/webhook.controller');
 const sseController = require('../controllers/sse.controller');
 const { authMiddleware } = require('../middleware/auth.middleware');
+const { ALL_STATUSES } = require('../../utils/payment-status');
 
 const isDevelopment = process.env.NODE_ENV !== 'production';
 const createPaymentRateLimit = isDevelopment
@@ -84,6 +85,24 @@ const webhookSchema = {
   }
 };
 
+const refundPaymentSchema = {
+  params: {
+    type: 'object',
+    required: ['paymentId'],
+    properties: {
+      paymentId: { type: 'string', minLength: 1 }
+    }
+  },
+  body: {
+    type: 'object',
+    required: ['reason'],
+    properties: {
+      reason: { type: 'string', minLength: 5, maxLength: 280 }
+    },
+    additionalProperties: false
+  }
+};
+
 /**
  * Payment ID parameter schema
  */
@@ -108,7 +127,7 @@ const listPaymentsSchema = {
       limit: { type: 'integer', minimum: 1, maximum: 100, default: 20 },
       status: { 
         type: 'string', 
-        enum: ['pending', 'processing', 'succeeded', 'failed', 'refunded'] 
+        enum: ALL_STATUSES
       }
     }
   }
@@ -175,6 +194,16 @@ module.exports = async function paymentRoutes(fastify) {
       config: { rateLimit: { max: 50, timeWindow: '1 hour' } }
     },
     paymentController.getPaymentStatus
+  );
+
+  fastify.post(
+    '/payments/:paymentId/refund',
+    {
+      schema: refundPaymentSchema,
+      preHandler: [authMiddleware],
+      config: { rateLimit: createPaymentRateLimit }
+    },
+    paymentController.refundPayment
   );
   
   // Create new payment (simplified)

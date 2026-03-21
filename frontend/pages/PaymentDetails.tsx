@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { usePaymentDetails } from '../hooks/usePaymentDetails';
+import { PaymentService } from '../services/payments';
 import StatusBadge from '../components/ui/StatusBadge';
 import {
   Activity,
@@ -16,6 +17,7 @@ import {
   Hash,
   Loader2,
   RefreshCw,
+  RotateCcw,
   Server,
   ShieldAlert,
   User,
@@ -45,6 +47,9 @@ const PaymentDetails: React.FC = () => {
 
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [refundInFlight, setRefundInFlight] = useState(false);
+  const [refundError, setRefundError] = useState<string | null>(null);
+  const [refundReasonInput, setRefundReasonInput] = useState('');
 
   const filteredAndSortedAuditLog = useMemo(() => {
     if (!payment?.auditLog.length) return [];
@@ -130,16 +135,47 @@ const PaymentDetails: React.FC = () => {
   const status = payment.status.toLowerCase();
   const isFailed = status === 'failed';
   const isProcessing = status === 'processing';
+  const isRefunded = status === 'refunded';
+  const refundReason = refundReasonInput.trim();
+  const canRefund = Boolean(payment.refund?.eligible && !refundInFlight && refundReason.length >= 5);
 
-  const steps = [
-    { id: 'pending', label: 'Pending', icon: Clock },
-    { id: 'processing', label: 'Processing', icon: Activity },
-    {
-      id: isFailed ? 'failed' : 'succeeded',
-      label: isFailed ? 'Failed' : 'Succeeded',
-      icon: isFailed ? XCircle : CheckCircle2,
-    },
-  ];
+  const handleRefund = async () => {
+    if (!payment.refund?.eligible || refundInFlight) return;
+
+    const confirmed = window.confirm(
+      `Refund ${new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency: payment.currency,
+      }).format(parseFloat(payment.amount))} for order ${payment.orderId}?`
+    );
+
+    if (!confirmed) return;
+
+    try {
+      setRefundError(null);
+      setRefundInFlight(true);
+      await PaymentService.refundPayment(payment.id, refundReason);
+      setRefundReasonInput('');
+      await refetch();
+    } catch (err: any) {
+      setRefundError(err.message || 'Refund failed. Please try again.');
+    } finally {
+      setRefundInFlight(false);
+    }
+  };
+
+  const steps = isFailed
+    ? [
+        { id: 'pending', label: 'Pending', icon: Clock },
+        { id: 'processing', label: 'Processing', icon: Activity },
+        { id: 'failed', label: 'Failed', icon: XCircle },
+      ]
+    : [
+        { id: 'pending', label: 'Pending', icon: Clock },
+        { id: 'processing', label: 'Processing', icon: Activity },
+        { id: 'succeeded', label: 'Succeeded', icon: CheckCircle2 },
+        ...(isRefunded ? [{ id: 'refunded', label: 'Refunded', icon: RotateCcw }] : []),
+      ];
 
   const currentStepIndex = steps.findIndex((step) => step.id === status);
 
@@ -177,6 +213,9 @@ const PaymentDetails: React.FC = () => {
                   }).format(parseFloat(payment.amount))}
                 </div>
                 <p className="mt-1 text-sm text-slate-400">{payment.currency}</p>
+                {payment.refundDetails && (
+                  <p className="mt-2 text-sm font-semibold text-orange-700">Fully refunded</p>
+                )}
               </div>
             </div>
 
@@ -228,6 +267,106 @@ const PaymentDetails: React.FC = () => {
                 </div>
               </div>
             )}
+
+            {payment.refundDetails && (
+              <div className="mt-4 rounded-xl border border-orange-200 bg-gradient-to-r from-orange-50 via-amber-50 to-white p-5">
+                <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                  <div className="flex items-start gap-3">
+                    <RotateCcw className="mt-0.5 h-5 w-5 shrink-0 text-orange-600" />
+                    <div className="space-y-1">
+                      <p className="text-sm font-semibold uppercase tracking-wide text-orange-700">Refund Completed</p>
+                      <p className="text-lg font-bold text-slate-900">
+                        {new Intl.NumberFormat('en-US', {
+                          style: 'currency',
+                          currency: payment.currency,
+                        }).format(parseFloat(payment.amount))} returned to the customer
+                      </p>
+                      <p className="text-sm text-orange-800">{payment.refundDetails.reason}</p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 gap-2 text-sm md:min-w-80">
+                    <div className="rounded-lg border border-orange-200 bg-white px-3 py-2">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-orange-700">Refunded at</p>
+                      <p className="mt-1 font-medium text-slate-900">{formatDateTime(payment.refundDetails.refundedAt)}</p>
+                    </div>
+                    <div className="rounded-lg border border-orange-200 bg-white px-3 py-2">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-orange-700">Triggered by</p>
+                      <p className="mt-1 font-medium text-slate-900">
+                        {payment.refundDetails.actor?.email || toTitleCase(payment.refundDetails.triggeredBy)}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-4 flex flex-wrap gap-2 text-xs">
+                  <span className="rounded-full border border-orange-300 bg-white px-2 py-1 text-orange-700">
+                    Source: {toTitleCase(payment.refundDetails.triggeredBy)}
+                  </span>
+                  {payment.refundDetails.worker && (
+                    <span className="rounded-full border border-orange-300 bg-white px-2 py-1 text-orange-700">
+                      Worker: {payment.refundDetails.worker}
+                    </span>
+                  )}
+                  {payment.refundDetails.jobId && (
+                    <span className="rounded-full border border-orange-300 bg-white px-2 py-1 font-mono text-orange-700">
+                      Job: {payment.refundDetails.jobId}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {!payment.refundDetails && payment.refund?.eligible && (
+              <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                  <div className="flex items-start gap-3">
+                    <RotateCcw className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
+                    <div>
+                      <p className="text-sm font-semibold text-emerald-900">Refund Available</p>
+                      <p className="mt-0.5 text-sm text-emerald-800">
+                        This payment can be refunded because it has completed successfully.
+                      </p>
+                      <label className="mt-3 block">
+                        <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-emerald-900">
+                          Refund reason
+                        </span>
+                        <textarea
+                          value={refundReasonInput}
+                          onChange={(event) => setRefundReasonInput(event.target.value)}
+                          rows={3}
+                          maxLength={280}
+                          placeholder="Explain why this refund is being issued."
+                          className="w-full rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition-all focus:border-transparent focus:ring-2 focus:ring-emerald-500"
+                        />
+                      </label>
+                      <p className="mt-1 text-xs text-emerald-800">
+                        This reason is stored in the audit trail with the user and timestamp.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleRefund}
+                    disabled={!canRefund}
+                    className={cn(
+                      'inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors',
+                      canRefund
+                        ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+                        : 'cursor-not-allowed bg-emerald-200 text-emerald-700'
+                    )}
+                  >
+                    <RotateCcw className={cn('h-4 w-4', refundInFlight && 'animate-spin')} />
+                    {refundInFlight ? 'Refunding...' : 'Refund Payment'}
+                  </button>
+                </div>
+                {refundReason.length < 5 && (
+                  <p className="mt-3 text-sm text-amber-700">
+                    Enter at least 5 characters so the refund audit trail records why this refund was triggered.
+                  </p>
+                )}
+                {refundError && (
+                  <p className="mt-3 text-sm text-red-700">{refundError}</p>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="border-b border-slate-200 bg-slate-50 px-6 py-8 md:px-8">
@@ -236,7 +375,7 @@ const PaymentDetails: React.FC = () => {
               <div
                 className={cn(
                   'absolute left-0 top-5 -z-10 h-1 transition-all duration-700',
-                  isFailed ? 'bg-red-500' : 'bg-emerald-500'
+                  isFailed ? 'bg-red-500' : isRefunded ? 'bg-orange-500' : 'bg-emerald-500'
                 )}
                 style={{
                   width: currentStepIndex >= 0 ? `${(currentStepIndex / (steps.length - 1)) * 100}%` : '0%',
@@ -255,6 +394,8 @@ const PaymentDetails: React.FC = () => {
                         isCompleted
                           ? step.id === 'failed'
                             ? 'border-red-500 bg-red-100 text-red-600'
+                            : step.id === 'refunded'
+                              ? 'border-orange-500 bg-orange-100 text-orange-600'
                             : 'border-emerald-500 bg-emerald-100 text-emerald-600'
                           : 'border-slate-300 bg-white text-slate-400'
                       )}
@@ -373,6 +514,36 @@ const PaymentDetails: React.FC = () => {
                   )}
                 </div>
                 <div>
+                  <p className="text-slate-500">Refund Status</p>
+                  <p className="font-medium text-slate-900">
+                    {payment.refund?.state === 'refunded'
+                      ? 'Refunded'
+                      : payment.refund?.eligible
+                        ? 'Eligible for refund'
+                        : 'Not eligible for refund'}
+                  </p>
+                  {payment.refund?.refundedAt && (
+                    <p className="mt-1 text-xs text-slate-500">{formatDateTime(payment.refund.refundedAt)}</p>
+                  )}
+                </div>
+                {payment.refundDetails && (
+                  <>
+                    <div>
+                      <p className="text-slate-500">Amount Returned</p>
+                      <p className="font-medium text-slate-900">
+                        {new Intl.NumberFormat('en-US', {
+                          style: 'currency',
+                          currency: payment.currency,
+                        }).format(parseFloat(payment.amount))}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-slate-500">Refund Reason</p>
+                      <p className="font-medium text-slate-900">{payment.refundDetails.reason}</p>
+                    </div>
+                  </>
+                )}
+                <div>
                   <p className="text-slate-500">Idempotency Key</p>
                   <p className="break-all font-mono text-xs text-slate-900">{payment.idempotencyKey}</p>
                 </div>
@@ -424,8 +595,9 @@ const PaymentDetails: React.FC = () => {
                       'rounded-lg border-2 bg-white p-4 transition-all',
                       entry.toStatus === 'succeeded' && 'border-emerald-200 bg-emerald-50/30',
                       entry.toStatus === 'failed' && 'border-red-200 bg-red-50/30',
+                      entry.toStatus === 'refunded' && 'border-orange-200 bg-orange-50/30',
                       entry.toStatus === 'processing' && 'border-amber-200 bg-amber-50/30',
-                      !['succeeded', 'failed', 'processing'].includes(entry.toStatus) && 'border-slate-200'
+                      !['succeeded', 'failed', 'processing', 'refunded'].includes(entry.toStatus) && 'border-slate-200'
                     )}
                   >
                     <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
@@ -480,6 +652,12 @@ const PaymentDetails: React.FC = () => {
                             {entry.failureReason}
                           </div>
                         )}
+
+                        {entry.refundReason && (
+                          <div className="rounded-md border border-orange-200 bg-orange-50 px-3 py-2 text-sm text-orange-800">
+                            Refund reason: {entry.refundReason}
+                          </div>
+                        )}
                       </div>
 
                       <div className="shrink-0 text-sm text-slate-500 md:text-right">
@@ -502,9 +680,9 @@ const PaymentDetails: React.FC = () => {
             <button
               onClick={() => refetch()}
               className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-4 py-2 font-medium text-slate-700 transition-colors hover:bg-slate-50"
-              disabled={isProcessing}
+              disabled={isProcessing || refundInFlight}
             >
-              <RefreshCw className={cn('h-4 w-4', isProcessing && 'animate-spin')} />
+              <RefreshCw className={cn('h-4 w-4', (isProcessing || refundInFlight) && 'animate-spin')} />
               Refresh
             </button>
             <Link

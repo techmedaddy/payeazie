@@ -22,6 +22,7 @@ export interface AuditLogEntry {
   gatewayStatus: string | null;
   failureCode: string | null;
   failureReason: string | null;
+  refundReason: string | null;
   summary: string;
   metadata: Record<string, unknown>;
 }
@@ -47,6 +48,24 @@ interface FailureDetails {
   chargeId: string | null;
 }
 
+interface RefundDetails {
+  reason: string;
+  refundedAt: string;
+  worker: string | null;
+  jobId: string | null;
+  chargeId: string | null;
+  gatewayStatus: string | null;
+  triggeredBy: string;
+  actor: PaymentActor | null;
+}
+
+interface RefundState {
+  eligible: boolean;
+  state: 'eligible' | 'not_eligible' | 'refunded';
+  refundableStatuses: string[];
+  refundedAt: string | null;
+}
+
 interface LatestActivity {
   summary: string;
   createdAt: string;
@@ -69,6 +88,8 @@ export interface PaymentDetails {
   gateway: PaymentGatewayDetails;
   processingDetails: ProcessingDetails | null;
   failureDetails: FailureDetails | null;
+  refundDetails: RefundDetails | null;
+  refund: RefundState | null;
   latestActivity: LatestActivity | null;
   auditLog: AuditLogEntry[];
 }
@@ -95,6 +116,7 @@ function normalizeAuditEntry(entry: any): AuditLogEntry {
     gatewayStatus: entry.gatewayStatus ?? null,
     failureCode: entry.failureCode ?? null,
     failureReason: entry.failureReason ?? null,
+    refundReason: entry.refundReason ?? null,
     summary: entry.summary || 'Payment status updated.',
     metadata: entry.metadata || {},
   };
@@ -132,6 +154,8 @@ function transformPaymentDetails(data: any): PaymentDetails {
     },
     processingDetails: data.processingDetails || null,
     failureDetails: data.failureDetails || null,
+    refundDetails: data.refundDetails || null,
+    refund: data.refund || null,
     latestActivity: data.latestActivity || null,
     auditLog,
   };
@@ -146,7 +170,7 @@ interface UsePaymentDetailsResult {
   elapsedTime: number;
 }
 
-const FINAL_STATUSES = ['succeeded', 'failed'];
+const FINAL_STATUSES = ['succeeded', 'failed', 'refunded'];
 const POLL_INTERVAL = 5000;
 
 export const usePaymentDetails = (paymentId: string): UsePaymentDetailsResult => {

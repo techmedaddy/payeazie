@@ -1,7 +1,7 @@
 import React from 'react';
 import { cn } from '../../utils/cn';
 import { PaymentStatus } from '../../types';
-import { CheckCircle, Clock, XCircle, AlertCircle } from 'lucide-react';
+import { AlertCircle, CheckCircle, Clock, RotateCcw, XCircle } from 'lucide-react';
 
 interface StatusBadgeProps {
   status?: PaymentStatus | string;
@@ -46,6 +46,11 @@ const StatusBadge: React.FC<StatusBadgeProps> = ({
       color: "bg-red-50 text-red-700 border-red-200",
       icon: <XCircle className="w-3.5 h-3.5" />,
       label: "Failed"
+    },
+    [PaymentStatus.REFUNDED]: {
+      color: "bg-orange-50 text-orange-700 border-orange-200",
+      icon: <RotateCcw className="w-3.5 h-3.5" />,
+      label: "Refunded"
     },
     UNKNOWN: {
       color: "bg-amber-50 text-amber-700 border-amber-200",

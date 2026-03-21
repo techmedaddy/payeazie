@@ -132,5 +132,37 @@ module.exports = {
             metrics.recordGatewayCall(false, Date.now() - startTime);
             throw err;
         }
+    },
+
+    /**
+     * Refund a succeeded charge with the gateway.
+     * Called by the refund action endpoint.
+     */
+    refund: async (chargeId) => {
+        const startTime = Date.now();
+
+        try {
+            await new Promise(resolve => setTimeout(resolve, 30));
+
+            const response = {
+                id: chargeId,
+                refundId: `rf_${chargeId.replace(/^ch_/, '')}`,
+                status: 'refunded',
+                provider: 'mock'
+            };
+
+            if (!response.id || !response.refundId || response.status !== 'refunded') {
+                logger.error({ response }, '❌ gatewayClient.refund: invalid response structure');
+                throw new Error('Invalid gateway refund response');
+            }
+
+            logger.info({ chargeId, refundId: response.refundId }, '✅ gatewayClient.refund simulated');
+            metrics.recordGatewayCall(true, Date.now() - startTime);
+
+            return response;
+        } catch (err) {
+            metrics.recordGatewayCall(false, Date.now() - startTime);
+            throw err;
+        }
     }
 };

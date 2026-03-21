@@ -77,7 +77,11 @@ export const usePaymentStream = (
           onStatusChange?.(data);
 
           // Auto-close on final status
-          if (data.toStatus === 'succeeded' || data.toStatus === 'failed') {
+          if (
+            data.toStatus === 'succeeded' ||
+            data.toStatus === 'failed' ||
+            data.toStatus === 'refunded'
+          ) {
             eventSource.close();
             setIsConnected(false);
             shouldReconnectRef.current = false;

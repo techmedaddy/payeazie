@@ -60,30 +60,6 @@ function transformPaymentResponse(backendData: any): PaymentResponse {
   };
 }
 
-export interface PaymentListResponse {
-  data: PaymentResponse[];
-  pagination: {
-    page: number;
-    limit: number;
-    total: number;
-    totalPages: number;
-    hasNext: boolean;
-    hasPrev: boolean;
-  };
-  filters: {
-    status: string;
-  };
-}
-
-export interface AuditLogEntry {
-  id: number;
-  paymentId: string;
-  previousStatus: string;
-  newStatus: string;
-  timestamp: string;
-  metadata?: any;
-}
-
 export const PaymentService = {
   /**
    * List payments with pagination and optional status filter
@@ -156,6 +132,15 @@ export const PaymentService = {
       return transformPaymentResponse(response);
     } catch (err) {
       console.error(`PaymentService.getPaymentById failed for id=${id}`, err);
+      throw err;
+    }
+  },
+
+  refundPayment: async (paymentId: string, reason: string): Promise<any> => {
+    try {
+      return await api.post<any>(`/api/payments/${paymentId}/refund`, { reason });
+    } catch (err) {
+      console.error(`PaymentService.refundPayment failed for id=${paymentId}`, err);
       throw err;
     }
   },

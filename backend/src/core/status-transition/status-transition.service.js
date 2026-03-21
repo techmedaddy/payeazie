@@ -1,6 +1,7 @@
 const db = require('../../db');
 const logger = require('../../utils/logger');
 const Redis = require('ioredis');
+const { ALLOWED_TRANSITIONS, canTransition } = require('../../utils/payment-status');
 
 const redisUrl = process.env.REDIS_URL;
 if (!redisUrl) {
@@ -25,14 +26,6 @@ redisPublisher.on('connect', () => {
     logger.info('status-transition: Redis publisher connected');
 });
 
-// Valid status transitions
-const ALLOWED_TRANSITIONS = {
-    pending: new Set(['processing', 'failed']),
-    processing: new Set(['succeeded', 'failed']),
-    succeeded: new Set([]),
-    failed: new Set([])
-};
-
 class StatusTransitionError extends Error {
     constructor(message) {
         super(message);
@@ -44,14 +37,7 @@ class StatusTransitionError extends Error {
  * Validate if a status transition is allowed
  */
 const isValidTransition = (fromStatus, toStatus) => {
-    if (!fromStatus || !toStatus) {
-        return false;
-    }
-    if (fromStatus === toStatus) {
-        return true;
-    }
-    const allowedNext = ALLOWED_TRANSITIONS[fromStatus];
-    return allowedNext ? allowedNext.has(toStatus) : false;
+    return canTransition(fromStatus, toStatus);
 };
 
 /**

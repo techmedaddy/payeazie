@@ -3,6 +3,7 @@ export enum PaymentStatus {
   PROCESSING = 'PROCESSING',
   SUCCEEDED = 'SUCCEEDED',
   FAILED = 'FAILED',
+  REFUNDED = 'REFUNDED',
 }
 
 export interface PaymentIntentRequest {

@@ -5,14 +5,12 @@ import Dashboard from './Dashboard';
 import { PaymentService } from '../services/payments';
 import { PaymentStatus } from '../types';
 
-// Mock the PaymentService
 vi.mock('../services/payments', () => ({
   PaymentService: {
-    getPaymentById: vi.fn(),
+    listPayments: vi.fn(),
   },
 }));
 
-// Mock recharts to avoid canvas issues in tests
 vi.mock('recharts', () => ({
   BarChart: ({ children }: any) => <div data-testid="bar-chart">{children}</div>,
   Bar: () => <div />,
@@ -21,24 +19,16 @@ vi.mock('recharts', () => ({
   Tooltip: () => <div />,
   ResponsiveContainer: ({ children }: any) => <div>{children}</div>,
   CartesianGrid: () => <div />,
+  Legend: () => <div />,
 }));
 
-describe('Dashboard - Payment Status Rendering', () => {
+describe('Dashboard', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    localStorage.clear();
   });
 
-  const renderDashboard = () => {
-    return render(
-      <BrowserRouter>
-        <Dashboard />
-      </BrowserRouter>
-    );
-  };
-
-  it('should render all payment statuses correctly', async () => {
-    const mockPayments = [
+  const mockListResponse = {
+    data: [
       {
         id: 'pay-1',
         orderId: 'ORD-001',
@@ -66,183 +56,72 @@ describe('Dashboard - Payment Status Rendering', () => {
         createdAt: '2026-01-07T10:03:00Z',
         updatedAt: '2026-01-07T10:03:00Z',
       },
-    ];
-
-    // Store payment IDs in localStorage
-    localStorage.setItem(
-      'payeazie_recent_ids',
-      JSON.stringify(['pay-1', 'pay-2', 'pay-3'])
-    );
-
-    // Mock getPaymentById to return corresponding payments
-    vi.mocked(PaymentService.getPaymentById).mockImplementation((id) => {
-      const payment = mockPayments.find((p) => p.id === id);
-      return Promise.resolve(payment!);
-    });
-
-    renderDashboard();
-
-    // Wait for payments to load
-    await waitFor(() => {
-      expect(screen.getByText('Processing')).toBeInTheDocument();
-    });
-
-    // Verify all statuses are rendered
-    expect(screen.getByText('Processing')).toBeInTheDocument();
-    expect(screen.getByText('Succeeded')).toBeInTheDocument();
-    expect(screen.getByText('Failed')).toBeInTheDocument();
-
-    // Verify order IDs are displayed
-    expect(screen.getByText('#ORD-001')).toBeInTheDocument();
-    expect(screen.getByText('#ORD-002')).toBeInTheDocument();
-    expect(screen.getByText('#ORD-003')).toBeInTheDocument();
-  });
-
-  it('should handle payments with missing status gracefully', async () => {
-    const mockPayments = [
       {
-        id: 'pay-no-status',
-        orderId: 'ORD-NO-STATUS',
-        amount: 1000,
+        id: 'pay-4',
+        orderId: 'ORD-004',
+        amount: 4000,
         currency: 'USD',
-        status: undefined as any, // Missing status
-        createdAt: '2026-01-07T10:00:00Z',
-        updatedAt: '2026-01-07T10:00:00Z',
+        status: PaymentStatus.REFUNDED,
+        createdAt: '2026-01-07T10:04:00Z',
+        updatedAt: '2026-01-07T10:05:00Z',
       },
-    ];
+    ],
+    pagination: {
+      page: 1,
+      limit: 100,
+      total: 4,
+      totalPages: 1,
+      hasNext: false,
+      hasPrev: false,
+    },
+    filters: {
+      status: 'all',
+    },
+  };
 
-    localStorage.setItem(
-      'payeazie_recent_ids',
-      JSON.stringify(['pay-no-status'])
+  const renderDashboard = () =>
+    render(
+      <BrowserRouter>
+        <Dashboard />
+      </BrowserRouter>
     );
 
-    vi.mocked(PaymentService.getPaymentById).mockResolvedValue(
-      mockPayments[0]
-    );
+  it('renders refunded payments alongside the other statuses', async () => {
+    vi.mocked(PaymentService.listPayments).mockResolvedValue(mockListResponse);
 
     renderDashboard();
 
-    // Should show "Unknown" for missing status
     await waitFor(() => {
-      expect(screen.getByText('Unknown')).toBeInTheDocument();
+      expect(screen.getByText('Refunded Payments')).toBeInTheDocument();
     });
+
+    expect(screen.getAllByText('Refunded').length).toBeGreaterThan(0);
+    expect(screen.getByText('Refund Snapshot')).toBeInTheDocument();
+    expect(screen.getByText('Refunded Volume')).toBeInTheDocument();
+    expect(screen.getByText('Net Captured')).toBeInTheDocument();
+    expect(screen.getAllByText('ORD-004').length).toBeGreaterThan(0);
+    expect(screen.getByText('1 refunded payments')).toBeInTheDocument();
   });
 
-  it('should display empty state when no payments exist', async () => {
-    // No localStorage data
+  it('shows the refunded filter option', async () => {
+    vi.mocked(PaymentService.listPayments).mockResolvedValue(mockListResponse);
+
     renderDashboard();
 
     await waitFor(() => {
-      expect(screen.getByText('No local history found.')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'refunded' })).toBeInTheDocument();
     });
-
-    expect(
-      screen.getByText('Create your first payment')
-    ).toBeInTheDocument();
   });
 
-  it('should handle failed API calls gracefully', async () => {
-    localStorage.setItem(
-      'payeazie_recent_ids',
-      JSON.stringify(['pay-error'])
-    );
-
-    vi.mocked(PaymentService.getPaymentById).mockRejectedValue(
-      new Error('API Error')
-    );
+  it('handles failed API calls gracefully', async () => {
+    vi.mocked(PaymentService.listPayments).mockRejectedValue(new Error('API Error'));
 
     renderDashboard();
 
-    // Should still render without crashing
     await waitFor(() => {
-      expect(screen.queryByText('Processing')).not.toBeInTheDocument();
+      expect(
+        screen.getByText('Could not refresh the dashboard. Showing the last available data if any.')
+      ).toBeInTheDocument();
     });
-  });
-
-  it('should render status badges with icons', async () => {
-    const mockPayment = {
-      id: 'pay-with-icon',
-      orderId: 'ORD-ICON',
-      amount: 1000,
-      currency: 'USD',
-      status: PaymentStatus.SUCCEEDED,
-      createdAt: '2026-01-07T10:00:00Z',
-      updatedAt: '2026-01-07T10:00:00Z',
-    };
-
-    localStorage.setItem(
-      'payeazie_recent_ids',
-      JSON.stringify(['pay-with-icon'])
-    );
-
-    vi.mocked(PaymentService.getPaymentById).mockResolvedValue(mockPayment);
-
-    const { container } = renderDashboard();
-
-    await waitFor(() => {
-      expect(screen.getByText('Succeeded')).toBeInTheDocument();
-    });
-
-    // Check for icon (SVG element)
-    const statusBadge = container.querySelector('[role="status"]');
-    expect(statusBadge).toBeInTheDocument();
-    expect(statusBadge?.querySelector('svg')).toBeInTheDocument();
-  });
-
-  it('should set up auto-refresh interval', async () => {
-    const mockPayment = {
-      id: 'pay-refresh',
-      orderId: 'ORD-REFRESH',
-      amount: 1000,
-      currency: 'USD',
-      status: PaymentStatus.PROCESSING,
-      createdAt: '2026-01-07T10:00:00Z',
-      updatedAt: '2026-01-07T10:00:00Z',
-    };
-
-    localStorage.setItem(
-      'payeazie_recent_ids',
-      JSON.stringify(['pay-refresh'])
-    );
-
-    vi.mocked(PaymentService.getPaymentById).mockResolvedValue(mockPayment);
-
-    renderDashboard();
-
-    // Initial load should call the API
-    await waitFor(() => {
-      expect(screen.getByText('Processing')).toBeInTheDocument();
-    });
-
-    expect(PaymentService.getPaymentById).toHaveBeenCalled();
-  });
-
-  it('should display badge with correct styling', async () => {
-    const mockPayment = {
-      id: 'pay-style-1',
-      orderId: 'ORD-STYLE-1',
-      amount: 1000,
-      currency: 'USD',
-      status: PaymentStatus.SUCCEEDED,
-      createdAt: '2026-01-07T10:00:00Z',
-      updatedAt: '2026-01-07T10:00:00Z',
-    };
-
-    localStorage.setItem(
-      'payeazie_recent_ids',
-      JSON.stringify(['pay-style-1'])
-    );
-
-    vi.mocked(PaymentService.getPaymentById).mockResolvedValue(mockPayment);
-
-    const { container } = renderDashboard();
-
-    await waitFor(() => {
-      expect(screen.getByText('Succeeded')).toBeInTheDocument();
-    });
-
-    // Verify badge exists with role
-    const badge = container.querySelector('[role="status"]');
-    expect(badge).toBeInTheDocument();
   });
 });

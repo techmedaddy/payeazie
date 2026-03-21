@@ -241,10 +241,15 @@ describe('Status Transition Service', () => {
             expect(statusTransitionService.isValidTransition('processing', 'failed')).toBe(true);
         });
 
+        test('should validate succeeded → refunded', () => {
+            expect(statusTransitionService.isValidTransition('succeeded', 'refunded')).toBe(true);
+        });
+
         test('should reject invalid transitions', () => {
             expect(statusTransitionService.isValidTransition('pending', 'succeeded')).toBe(false);
             expect(statusTransitionService.isValidTransition('succeeded', 'processing')).toBe(false);
             expect(statusTransitionService.isValidTransition('failed', 'pending')).toBe(false);
+            expect(statusTransitionService.isValidTransition('failed', 'refunded')).toBe(false);
         });
 
         test('should allow same status', () => {
