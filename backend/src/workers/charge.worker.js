@@ -22,6 +22,7 @@ const worker = createWorker('payment_charge', async (job) => {
     const startTime = Date.now();
     const { paymentId } = job.data || {};
     const demo = job.data?.demo || { outcome: 'auto', processingSpeed: 'normal' };
+    const context = job.data?.context || {};
 
     if (!paymentId) {
         logger.error({ jobId: job.id }, 'charge.worker missing paymentId');
@@ -39,6 +40,8 @@ const worker = createWorker('payment_charge', async (job) => {
             gatewayProvider: 'mock',
             demoOutcome: demo.outcome || 'auto',
             processingSpeed: demo.processingSpeed || 'normal',
+            action: context.action || 'charge',
+            retryAttempt: context.retryAttempt || null,
             reason: 'Worker acquired job lock'
         }, null, 'worker');
         logger.info({ paymentId }, 'charge.worker: transitioned to processing');
@@ -171,6 +174,8 @@ const worker = createWorker('payment_charge', async (job) => {
                 failureCode: chargeResult?.failureCode || null,
                 demoOutcome: chargeResult?.demoOutcome || demo.outcome || 'auto',
                 processingSpeed: chargeResult?.processingSpeed || demo.processingSpeed || 'normal',
+                action: context.action || 'charge',
+                retryAttempt: context.retryAttempt || null,
                 error: chargeResult?.failureMessage || null,
                 reason: chargeResult?.failureMessage || `Gateway charge completed with status: ${finalStatus}`
             }, null, 'worker');
@@ -211,6 +216,8 @@ const worker = createWorker('payment_charge', async (job) => {
                 gatewayProvider: 'mock',
                 demoOutcome: demo.outcome || 'auto',
                 processingSpeed: demo.processingSpeed || 'normal',
+                action: context.action || 'charge',
+                retryAttempt: context.retryAttempt || null,
                 reason: 'Gateway charge failed',
                 error: err.message
             }, null, 'worker');

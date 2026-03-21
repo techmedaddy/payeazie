@@ -1,5 +1,5 @@
 import { api } from './api';
-import { PaymentIntentRequest, PaymentResponse, PaymentStatus } from '../types';
+import { PaymentIntentRequest, PaymentResponse, PaymentStatus, ProcessingState } from '../types';
 
 export interface PaymentListResponse {
   data: PaymentResponse[];
@@ -57,6 +57,7 @@ function transformPaymentResponse(backendData: any): PaymentResponse {
     gatewayId: backendData.gatewayChargeId || backendData.gateway_charge_id,
     createdAt: backendData.createdAt || backendData.created_at,
     updatedAt: backendData.updatedAt || backendData.updated_at,
+    processing: (backendData.processing || null) as ProcessingState | null,
   };
 }
 
@@ -141,6 +142,33 @@ export const PaymentService = {
       return await api.post<any>(`/api/payments/${paymentId}/refund`, { reason });
     } catch (err) {
       console.error(`PaymentService.refundPayment failed for id=${paymentId}`, err);
+      throw err;
+    }
+  },
+
+  retryPayment: async (paymentId: string): Promise<any> => {
+    try {
+      return await api.post<any>(`/api/payments/${paymentId}/retry`, {});
+    } catch (err) {
+      console.error(`PaymentService.retryPayment failed for id=${paymentId}`, err);
+      throw err;
+    }
+  },
+
+  reconcileProcessingPayment: async (paymentId: string): Promise<any> => {
+    try {
+      return await api.post<any>(`/api/payments/${paymentId}/reconcile`, {});
+    } catch (err) {
+      console.error(`PaymentService.reconcileProcessingPayment failed for id=${paymentId}`, err);
+      throw err;
+    }
+  },
+
+  restartProcessingPayment: async (paymentId: string): Promise<any> => {
+    try {
+      return await api.post<any>(`/api/payments/${paymentId}/restart`, {});
+    } catch (err) {
+      console.error(`PaymentService.restartProcessingPayment failed for id=${paymentId}`, err);
       throw err;
     }
   },

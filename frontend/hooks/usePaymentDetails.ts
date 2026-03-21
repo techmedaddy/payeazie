@@ -5,6 +5,7 @@ interface PaymentActor {
   id: string;
   name: string | null;
   email: string | null;
+  role: string | null;
 }
 
 export interface AuditLogEntry {
@@ -14,6 +15,8 @@ export interface AuditLogEntry {
   toStatus: string;
   createdAt: string;
   triggeredBy: string;
+  operationSource: 'automatic' | 'user_triggered' | 'admin_triggered';
+  operationLabel: string;
   actor: PaymentActor | null;
   worker: string | null;
   jobId: string | null;
@@ -39,6 +42,25 @@ interface ProcessingDetails {
   jobId: string | null;
 }
 
+interface ProcessingRecoveryState {
+  eligible: boolean;
+  state: 'not_processing' | 'healthy' | 'reconcile' | 'restart';
+  canReconcile: boolean;
+  canRestart: boolean;
+  message: string;
+}
+
+interface ProcessingState {
+  active: boolean;
+  startedAt: string | null;
+  elapsedSeconds: number | null;
+  thresholdSeconds: number;
+  isStuck: boolean;
+  hasGatewayCharge: boolean;
+  stuckSince: string | null;
+  recovery: ProcessingRecoveryState;
+}
+
 interface FailureDetails {
   reason: string;
   code: string | null;
@@ -61,15 +83,32 @@ interface RefundDetails {
 
 interface RefundState {
   eligible: boolean;
-  state: 'eligible' | 'not_eligible' | 'refunded';
+  state: 'eligible' | 'not_eligible' | 'refunded' | 'blocked_missing_charge';
   refundableStatuses: string[];
   refundedAt: string | null;
+  hasGatewayCharge: boolean;
+  message: string;
+}
+
+interface RetryState {
+  eligible: boolean;
+  state: 'eligible' | 'not_eligible' | 'cooldown' | 'exhausted';
+  retryableStatuses: string[];
+  attemptsUsed: number;
+  attemptsRemaining: number;
+  maxAttempts: number;
+  cooldownSeconds: number;
+  availableAt: string | null;
+  lastRetriedAt: string | null;
+  message: string;
 }
 
 interface LatestActivity {
   summary: string;
   createdAt: string;
   triggeredBy: string;
+  operationSource: 'automatic' | 'user_triggered' | 'admin_triggered';
+  operationLabel: string;
   worker: string | null;
   jobId: string | null;
 }
@@ -86,10 +125,12 @@ export interface PaymentDetails {
   updatedAt: string;
   userId: string | null;
   gateway: PaymentGatewayDetails;
+  processing: ProcessingState | null;
   processingDetails: ProcessingDetails | null;
   failureDetails: FailureDetails | null;
   refundDetails: RefundDetails | null;
   refund: RefundState | null;
+  retry: RetryState | null;
   latestActivity: LatestActivity | null;
   auditLog: AuditLogEntry[];
 }
@@ -107,8 +148,11 @@ function normalizeAuditEntry(entry: any): AuditLogEntry {
           id: String(entry.actor.id),
           name: entry.actor.name ?? null,
           email: entry.actor.email ?? null,
+          role: entry.actor.role ?? null,
         }
       : null,
+    operationSource: entry.operationSource || 'automatic',
+    operationLabel: entry.operationLabel || 'Automatic',
     worker: entry.worker ?? null,
     jobId: entry.jobId ?? null,
     chargeId: entry.chargeId ?? null,
@@ -126,6 +170,7 @@ function transformPaymentDetails(data: any): PaymentDetails {
   const auditLog = Array.isArray(data.auditLog || data.audit_log)
     ? (data.auditLog || data.audit_log).map(normalizeAuditEntry)
     : [];
+  const latestActivity = data.latestActivity || null;
 
   return {
     id: data.id,
@@ -152,11 +197,23 @@ function transformPaymentDetails(data: any): PaymentDetails {
         null,
       lastKnownStatus: data.gateway?.lastKnownStatus || data.status,
     },
+    processing: data.processing || null,
     processingDetails: data.processingDetails || null,
     failureDetails: data.failureDetails || null,
     refundDetails: data.refundDetails || null,
     refund: data.refund || null,
-    latestActivity: data.latestActivity || null,
+    retry: data.retry || null,
+    latestActivity: latestActivity
+      ? {
+          summary: latestActivity.summary,
+          createdAt: latestActivity.createdAt,
+          triggeredBy: latestActivity.triggeredBy,
+          operationSource: latestActivity.operationSource || 'automatic',
+          operationLabel: latestActivity.operationLabel || 'Automatic',
+          worker: latestActivity.worker ?? null,
+          jobId: latestActivity.jobId ?? null,
+        }
+      : null,
     auditLog,
   };
 }

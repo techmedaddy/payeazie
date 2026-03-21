@@ -103,6 +103,36 @@ const refundPaymentSchema = {
   }
 };
 
+const retryPaymentSchema = {
+  params: {
+    type: 'object',
+    required: ['paymentId'],
+    properties: {
+      paymentId: { type: 'string', minLength: 1 }
+    }
+  }
+};
+
+const reconcilePaymentSchema = {
+  params: {
+    type: 'object',
+    required: ['paymentId'],
+    properties: {
+      paymentId: { type: 'string', minLength: 1 }
+    }
+  }
+};
+
+const restartProcessingSchema = {
+  params: {
+    type: 'object',
+    required: ['paymentId'],
+    properties: {
+      paymentId: { type: 'string', minLength: 1 }
+    }
+  }
+};
+
 /**
  * Payment ID parameter schema
  */
@@ -204,6 +234,36 @@ module.exports = async function paymentRoutes(fastify) {
       config: { rateLimit: createPaymentRateLimit }
     },
     paymentController.refundPayment
+  );
+
+  fastify.post(
+    '/payments/:paymentId/retry',
+    {
+      schema: retryPaymentSchema,
+      preHandler: [authMiddleware],
+      config: { rateLimit: createPaymentRateLimit }
+    },
+    paymentController.retryPayment
+  );
+
+  fastify.post(
+    '/payments/:paymentId/reconcile',
+    {
+      schema: reconcilePaymentSchema,
+      preHandler: [authMiddleware],
+      config: { rateLimit: createPaymentRateLimit }
+    },
+    paymentController.reconcileProcessingPayment
+  );
+
+  fastify.post(
+    '/payments/:paymentId/restart',
+    {
+      schema: restartProcessingSchema,
+      preHandler: [authMiddleware],
+      config: { rateLimit: createPaymentRateLimit }
+    },
+    paymentController.restartProcessingPayment
   );
   
   // Create new payment (simplified)

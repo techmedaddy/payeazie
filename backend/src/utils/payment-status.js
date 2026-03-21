@@ -28,19 +28,26 @@ const REFUNDABLE_STATUSES = Object.freeze([
   PAYMENT_STATUS.SUCCEEDED
 ]);
 
+const RETRYABLE_STATUSES = Object.freeze([
+  PAYMENT_STATUS.FAILED
+]);
+
 const ALLOWED_TRANSITIONS = Object.freeze({
   [PAYMENT_STATUS.PENDING]: new Set([
     PAYMENT_STATUS.PROCESSING,
     PAYMENT_STATUS.FAILED
   ]),
   [PAYMENT_STATUS.PROCESSING]: new Set([
+    PAYMENT_STATUS.PENDING,
     PAYMENT_STATUS.SUCCEEDED,
     PAYMENT_STATUS.FAILED
   ]),
   [PAYMENT_STATUS.SUCCEEDED]: new Set([
     PAYMENT_STATUS.REFUNDED
   ]),
-  [PAYMENT_STATUS.FAILED]: new Set([]),
+  [PAYMENT_STATUS.FAILED]: new Set([
+    PAYMENT_STATUS.PENDING
+  ]),
   [PAYMENT_STATUS.REFUNDED]: new Set([])
 });
 
@@ -60,6 +67,7 @@ const canTransition = (fromStatus, toStatus) => {
 };
 
 const canBeRefunded = (status) => REFUNDABLE_STATUSES.includes(status);
+const canBeRetried = (status) => RETRYABLE_STATUSES.includes(status);
 
 module.exports = {
   ...PAYMENT_STATUS,
@@ -67,9 +75,11 @@ module.exports = {
   ALL_STATUSES,
   FINAL_STATUSES,
   REFUNDABLE_STATUSES,
+  RETRYABLE_STATUSES,
   ALLOWED_TRANSITIONS,
   isFinal,
   canTransition,
   canBeRefunded,
+  canBeRetried,
   getFinalStatuses: () => [...FINAL_STATUSES]
 };

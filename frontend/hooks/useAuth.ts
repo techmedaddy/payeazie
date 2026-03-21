@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../services/api';
+import { useToast } from '../context/ToastContext';
 
 interface User {
   id: number;
@@ -21,6 +22,7 @@ interface UseAuthResult {
 export const useAuth = (): UseAuthResult => {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const { showToast } = useToast();
 
   // Fetch current user from token
   const refreshUser = useCallback(async () => {
@@ -74,6 +76,7 @@ export const useAuth = (): UseAuthResult => {
     
     api.setAuthToken(response.data.token);
     setUser(response.data.user);
+    showToast(`Welcome back, ${response.data.user.name || response.data.user.email}.`, 'success');
     
     console.log('✅ Token stored in localStorage');
   };
@@ -91,6 +94,7 @@ export const useAuth = (): UseAuthResult => {
     
     api.clearAuthToken();
     setUser(null);
+    showToast('You have been signed out.', 'info');
     
     console.log('✅ Logout successful');
     console.log('   Token removed from localStorage');

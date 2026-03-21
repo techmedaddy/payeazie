@@ -33,6 +33,12 @@ class StatusTransitionError extends Error {
     }
 }
 
+const OPERATION_SOURCE = Object.freeze({
+    AUTOMATIC: 'automatic',
+    USER_TRIGGERED: 'user_triggered',
+    ADMIN_TRIGGERED: 'admin_triggered'
+});
+
 /**
  * Validate if a status transition is allowed
  */
@@ -77,6 +83,39 @@ const emitStatusEvent = async (paymentId, fromStatus, toStatus, metadata = {}) =
     }
 };
 
+const classifyOperationSource = (triggeredBy, actorRole = null) => {
+    if (triggeredBy === 'user') {
+        return actorRole === 'admin'
+            ? OPERATION_SOURCE.ADMIN_TRIGGERED
+            : OPERATION_SOURCE.USER_TRIGGERED;
+    }
+
+    return OPERATION_SOURCE.AUTOMATIC;
+};
+
+const toOperationLabel = (operationSource) => {
+    switch (operationSource) {
+        case OPERATION_SOURCE.ADMIN_TRIGGERED:
+            return 'Admin-triggered';
+        case OPERATION_SOURCE.USER_TRIGGERED:
+            return 'User-triggered';
+        default:
+            return 'Automatic';
+    }
+};
+
+const enrichOpsMetadata = (metadata = {}, triggeredBy = 'system') => {
+    const actorRole = metadata.actorRole || null;
+    const operationSource = metadata.operationSource || classifyOperationSource(triggeredBy, actorRole);
+
+    return {
+        ...metadata,
+        actorRole,
+        operationSource,
+        operationLabel: metadata.operationLabel || toOperationLabel(operationSource)
+    };
+};
+
 /**
  * Create an audit log entry for a status transition
  */
@@ -114,7 +153,20 @@ const createAuditLog = async (t, paymentId, fromStatus, toStatus, metadata = {},
  * @param {string} triggeredBy - Who/what triggered the transition ('user', 'worker', 'system')
  * @returns {Promise<object>} The updated payment record
  */
-const transitionStatus = async (paymentId, toStatus, metadata = {}, userId = null, triggeredBy = 'system') => {
+const buildUpdateStatement = (toStatus, options = {}) => {
+    const assignments = ['status = $2', 'updated_at = NOW()'];
+
+    if (options.clearGatewayChargeId) {
+        assignments.push('gateway_charge_id = NULL');
+    }
+
+    return `UPDATE payments 
+            SET ${assignments.join(', ')}
+            WHERE id = $1 
+            RETURNING *`;
+};
+
+const transitionStatus = async (paymentId, toStatus, metadata = {}, userId = null, triggeredBy = 'system', options = {}) => {
     if (!paymentId) {
         throw new Error('paymentId is required');
     }
@@ -123,6 +175,7 @@ const transitionStatus = async (paymentId, toStatus, metadata = {}, userId = nul
     }
 
     logger.info({ paymentId, toStatus, metadata, userId, triggeredBy }, 'status-transition: starting transition');
+    const opsMetadata = enrichOpsMetadata(metadata, triggeredBy);
 
     return db.tx(async (t) => {
         // Lock the payment row for update
@@ -151,16 +204,10 @@ const transitionStatus = async (paymentId, toStatus, metadata = {}, userId = nul
         }
 
         // Update payment status
-        const updated = await t.one(
-            `UPDATE payments 
-             SET status = $2, updated_at = NOW() 
-             WHERE id = $1 
-             RETURNING *`,
-            [paymentId, toStatus]
-        );
+        const updated = await t.one(buildUpdateStatement(toStatus, options), [paymentId, toStatus]);
 
         // Create audit log entry within the transaction
-        await createAuditLog(t, paymentId, fromStatus, toStatus, metadata, userId, triggeredBy);
+        await createAuditLog(t, paymentId, fromStatus, toStatus, opsMetadata, userId, triggeredBy);
 
         logger.info({ 
             paymentId, 
@@ -173,12 +220,22 @@ const transitionStatus = async (paymentId, toStatus, metadata = {}, userId = nul
         // Emit event after transaction commits (outside the transaction)
         // We'll do this in a setImmediate to ensure transaction commits first
         setImmediate(() => {
-            emitStatusEvent(paymentId, fromStatus, toStatus, metadata);
+            emitStatusEvent(paymentId, fromStatus, toStatus, opsMetadata);
         });
 
         return updated;
     });
 };
+
+const retryPayment = (paymentId, metadata = {}, userId = null, triggeredBy = 'user') =>
+    transitionStatus(paymentId, 'pending', metadata, userId, triggeredBy, {
+        clearGatewayChargeId: true
+    });
+
+const restartProcessingPayment = (paymentId, metadata = {}, userId = null, triggeredBy = 'user') =>
+    transitionStatus(paymentId, 'pending', metadata, userId, triggeredBy, {
+        clearGatewayChargeId: true
+    });
 
 /**
  * Get audit log for a payment
@@ -192,7 +249,8 @@ const getAuditLog = async (paymentId) => {
         `SELECT 
             pal.*,
             u.email as user_email,
-            u.name as user_name
+            u.name as user_name,
+            u.role as user_role
          FROM payment_audit_log pal
          LEFT JOIN users u ON pal.user_id = u.id
          WHERE pal.payment_id = $1 
@@ -215,10 +273,15 @@ const closeConnections = async () => {
 
 module.exports = {
     transitionStatus,
+    retryPayment,
+    restartProcessingPayment,
     getAuditLog,
     isValidTransition,
     emitStatusEvent,
     closeConnections,
     StatusTransitionError,
-    ALLOWED_TRANSITIONS
+    ALLOWED_TRANSITIONS,
+    OPERATION_SOURCE,
+    classifyOperationSource,
+    toOperationLabel
 };

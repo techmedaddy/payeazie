@@ -1,7 +1,7 @@
 import React from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import Logo from '../Logo';
-import { LayoutDashboard, PlusCircle, User, Menu, X, Loader2, AlertCircle, CheckCircle, LogOut, ChevronDown } from 'lucide-react';
+import { LayoutDashboard, PlusCircle, User, Menu, X, Loader2, AlertCircle, CheckCircle, LogOut, ChevronDown, Settings } from 'lucide-react';
 import { cn } from '../../utils/cn';
 import { useApiHealth } from '../../hooks/useApiHealth';
 import { useAuthContext } from '../../context/AuthContext';
@@ -10,11 +10,12 @@ interface LayoutProps {
   children: React.ReactNode;
 }
 
-const NavItem: React.FC<{ to: string; icon: React.ReactNode; label: string; active: boolean }> = ({ 
-  to, icon, label, active 
+const NavItem: React.FC<{ to: string; icon: React.ReactNode; label: string; active: boolean; onClick?: () => void }> = ({
+  to, icon, label, active, onClick
 }) => (
   <Link
     to={to}
+    onClick={onClick}
     className={cn(
       "flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors",
       active 
@@ -37,10 +38,16 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const { isHealthy, isLoading, error, data } = useApiHealth();
   const { user, logout } = useAuthContext();
 
+  const closeMenus = () => {
+    setIsMobileMenuOpen(false);
+    setShowUserMenu(false);
+  };
+
   const handleLogout = () => {
     console.log('🔵 Logout button clicked');
     console.log('   Clearing token and redirecting to login');
     
+    closeMenus();
     logout();
     navigate('/login');
     
@@ -139,6 +146,14 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                         <p className="text-sm font-medium text-slate-900">{user?.name}</p>
                         <p className="text-xs text-slate-500 mt-0.5">{user?.email}</p>
                       </div>
+                      <Link
+                        to="/account"
+                        onClick={closeMenus}
+                        className="flex items-center gap-3 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 transition-colors"
+                      >
+                        <Settings className="w-4 h-4" />
+                        <span>Account</span>
+                      </Link>
                       <button
                         onClick={handleLogout}
                         className="w-full flex items-center gap-3 px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors"
@@ -161,13 +176,22 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                   to="/dashboard" 
                   icon={<LayoutDashboard />} 
                   label="Dashboard" 
-                  active={location.pathname === '/dashboard' || location.pathname === '/'} 
+                  active={location.pathname === '/dashboard' || location.pathname === '/'}
+                  onClick={closeMenus}
                 />
                 <NavItem 
                   to="/create" 
                   icon={<PlusCircle />} 
                   label="Create Payment" 
-                  active={location.pathname === '/create'} 
+                  active={location.pathname === '/create'}
+                  onClick={closeMenus}
+                />
+                <NavItem
+                  to="/account"
+                  icon={<Settings />}
+                  label="Account"
+                  active={location.pathname === '/account'}
+                  onClick={closeMenus}
                 />
                 
                 {/* Mobile User Info */}

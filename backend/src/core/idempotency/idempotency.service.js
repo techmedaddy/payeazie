@@ -58,7 +58,11 @@ const normalizePayment = (row = {}) => ({
     amount: row.amount !== undefined ? Number(row.amount) : row.amount
 });
 
-const enqueueChargeJob = async (paymentId, demo = { outcome: 'auto', processingSpeed: 'normal' }) => {
+const enqueueChargeJob = async (
+    paymentId,
+    demo = { outcome: 'auto', processingSpeed: 'normal' },
+    context = {}
+) => {
     if (!paymentId) {
         logger.warn('enqueueChargeJob: no paymentId provided');
         return;
@@ -70,12 +74,12 @@ const enqueueChargeJob = async (paymentId, demo = { outcome: 'auto', processingS
     }
     
     try {
-        await queueClient.add('payment_charge', 'payment.charge', { paymentId, demo }, {
+        await queueClient.add('payment_charge', 'payment.charge', { paymentId, demo, context }, {
             removeOnComplete: true,
             attempts: 5,
             backoff: { type: 'exponential', delay: 250 }
         });
-        logger.debug({ paymentId, demo }, 'enqueueChargeJob: job added successfully');
+        logger.debug({ paymentId, demo, context }, 'enqueueChargeJob: job added successfully');
     } catch (err) {
         logger.error({ error: err.message, paymentId }, 'enqueueChargeJob: failed to add job');
         throw err;
@@ -168,6 +172,7 @@ const idempotencyService = {
     createOrRetrieve: (params) => IdempotencyService.createOrRetrieve(params),
     resolve: (orderId, idempotencyKey, amount, currency, userId = null, demo = { outcome: 'auto', processingSpeed: 'normal' }) =>
         IdempotencyService.createOrRetrieve({ orderId, idempotencyKey, amount, currency, userId, demo }),
+    enqueueChargeJob,
     IdempotencyConflictError,
     IdempotencyMismatchError: IdempotencyConflictError,
     DuplicateOrderError

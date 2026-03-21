@@ -4,8 +4,11 @@ import Layout from './components/ui/Layout';
 import Dashboard from './pages/Dashboard';
 import CreatePayment from './pages/CreatePayment';
 import PaymentDetails from './pages/PaymentDetails';
+import Account from './pages/Account';
 import Login from './pages/Login';
 import Register from './pages/Register';
+import ForgotPassword from './pages/ForgotPassword';
+import ResetPassword from './pages/ResetPassword';
 import GoogleCallback from './pages/GoogleCallback';
 import NotFound from './pages/NotFound';
 import { ToastProvider } from './context/ToastContext';
@@ -81,6 +84,8 @@ const App: React.FC = () => {
               {/* Public Routes */}
               <Route path="/login" element={<Login />} />
               <Route path="/register" element={<Register />} />
+              <Route path="/forgot-password" element={<ForgotPassword />} />
+              <Route path="/reset-password" element={<ResetPassword />} />
               <Route path="/auth/google/callback" element={<GoogleCallback />} />
               
               {/* Protected Routes */}
@@ -93,6 +98,11 @@ const App: React.FC = () => {
               <Route path="/create" element={
                 <ProtectedRoute>
                   <Layout><CreatePayment /></Layout>
+                </ProtectedRoute>
+              } />
+              <Route path="/account" element={
+                <ProtectedRoute>
+                  <Layout><Account /></Layout>
                 </ProtectedRoute>
               } />
               <Route path="/payment/:id" element={

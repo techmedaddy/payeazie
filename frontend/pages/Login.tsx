@@ -1,13 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthContext } from '../context/AuthContext';
-import { Loader2, LogIn, Mail, Lock, AlertCircle } from 'lucide-react';
+import { useToast } from '../context/ToastContext';
+import { Loader2, LogIn, Mail, Lock, AlertCircle, CheckCircle2 } from 'lucide-react';
 import Logo from '../components/Logo';
+import { api } from '../services/api';
 
 const Login: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { login } = useAuthContext();
+  const { showToast } = useToast();
   
   const [formData, setFormData] = useState({
     email: '',
@@ -15,6 +18,8 @@ const Login: React.FC = () => {
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const resetSuccess = new URLSearchParams(location.search).get('reset') === 'success';
+  const registrationSuccess = new URLSearchParams(location.search).get('registered') === 'success';
 
   const from = (location.state as any)?.from?.pathname || '/dashboard';
 
@@ -27,9 +32,12 @@ const Login: React.FC = () => {
     
     const searchParams = new URLSearchParams(location.search);
     const oauthError = searchParams.get('error');
+    const resetStatus = searchParams.get('reset');
+    const registeredStatus = searchParams.get('registered');
     
     // Check for OAuth token in URL (from Google OAuth callback)
     const token = searchParams.get('token');
+    const authRedirectReason = api.consumeAuthRedirectReason();
     
     console.log('   Token in URL:', token ? 'YES' : 'NO');
     console.log('   Error in URL:', oauthError ? oauthError : 'NO');
@@ -41,6 +49,7 @@ const Login: React.FC = () => {
       
       // Store token
       localStorage.setItem('authToken', token);
+      showToast('Signed in successfully with Google.', 'success');
       
       // Redirect to dashboard
       navigate('/dashboard', { replace: true });
@@ -55,8 +64,28 @@ const Login: React.FC = () => {
       };
       
       setError(errorMessages[oauthError] || 'An unexpected error occurred during login.');
+      showToast(errorMessages[oauthError] || 'An unexpected error occurred during login.', 'error');
+      return;
     }
-  }, [location.search, navigate]);
+
+    if (resetStatus === 'success') {
+      setError(null);
+      showToast('Password updated. Sign in with your new password.', 'success');
+    }
+
+    if (registeredStatus === 'success') {
+      setError(null);
+      showToast('Account created successfully. Sign in to continue.', 'success');
+    }
+
+    if (authRedirectReason === 'session_expired') {
+      setError('Your session expired. Please sign in again to continue.');
+      showToast('Your session expired. Please sign in again.', 'info');
+    } else if (authRedirectReason === 'login_required') {
+      setError('Please sign in to continue.');
+      showToast('Please sign in to continue.', 'info');
+    }
+  }, [location.search, navigate, showToast]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -64,10 +93,14 @@ const Login: React.FC = () => {
     setLoading(true);
 
     try {
-      await login(formData.email, formData.password);
+      await login(formData.email.trim(), formData.password);
       navigate(from, { replace: true });
     } catch (err: any) {
-      setError(err.message || 'Login failed. Please check your credentials.');
+      const nextError =
+        err.message === 'Invalid credentials'
+          ? 'That email/password combination did not match our records.'
+          : err.message || 'Login failed. Please check your credentials.';
+      setError(nextError);
     } finally {
       setLoading(false);
     }
@@ -98,6 +131,18 @@ const Login: React.FC = () => {
 
         {/* Login Card */}
         <div className="bg-white rounded-2xl shadow-xl border border-slate-200 p-8">
+          {resetSuccess && !error && (
+            <div className="mb-6 p-4 bg-emerald-50 border border-emerald-200 rounded-lg flex items-start gap-3">
+              <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <p className="text-sm font-medium text-emerald-900">Password Reset Successful</p>
+                <p className="text-sm text-emerald-700 mt-1">
+                  You can now sign in with your new password.
+                </p>
+              </div>
+            </div>
+          )}
+
           {error && (
             <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
               <AlertCircle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
@@ -145,6 +190,12 @@ const Login: React.FC = () => {
                   disabled={loading}
                 />
               </div>
+            </div>
+
+            <div className="flex items-center justify-end">
+              <Link to="/forgot-password" className="text-sm font-medium text-purple-600 hover:text-purple-700">
+                Forgot password?
+              </Link>
             </div>
 
             {/* Submit Button */}
@@ -199,6 +250,9 @@ const Login: React.FC = () => {
             <Link to="/register" className="text-purple-600 font-semibold hover:text-purple-700">
               Sign up
             </Link>
+          </div>
+          <div className="mt-2 text-center text-xs text-slate-500">
+            {from !== '/dashboard' ? 'Sign in to get back where you left off.' : 'Secure access to your account and payment history.'}
           </div>
         </div>
 

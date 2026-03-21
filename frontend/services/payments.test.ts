@@ -282,4 +282,41 @@ describe('PaymentService Status Normalization', () => {
       expect(result).toEqual(mockRefundResponse);
     });
   });
+
+  describe('retryPayment', () => {
+    it('should call the retry endpoint for a failed payment', async () => {
+      vi.mocked(api.post).mockResolvedValue({
+        id: 'pay-retry-123',
+        status: 'pending',
+      });
+
+      await PaymentService.retryPayment('pay-retry-123');
+
+      expect(api.post).toHaveBeenCalledWith('/api/payments/pay-retry-123/retry', {});
+    });
+  });
+
+  describe('processing recovery actions', () => {
+    it('should call the reconcile endpoint for a stuck processing payment', async () => {
+      vi.mocked(api.post).mockResolvedValue({
+        id: 'pay-proc-1',
+        status: 'processing',
+      });
+
+      await PaymentService.reconcileProcessingPayment('pay-proc-1');
+
+      expect(api.post).toHaveBeenCalledWith('/api/payments/pay-proc-1/reconcile', {});
+    });
+
+    it('should call the restart endpoint for a stuck processing payment', async () => {
+      vi.mocked(api.post).mockResolvedValue({
+        id: 'pay-proc-2',
+        status: 'pending',
+      });
+
+      await PaymentService.restartProcessingPayment('pay-proc-2');
+
+      expect(api.post).toHaveBeenCalledWith('/api/payments/pay-proc-2/restart', {});
+    });
+  });
 });

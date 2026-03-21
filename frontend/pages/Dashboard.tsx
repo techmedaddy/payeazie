@@ -32,6 +32,11 @@ const DASHBOARD_PAGE_LIMIT = 100;
 const MAX_DASHBOARD_PAGES = 5;
 const STUCK_THRESHOLD_MS = 60 * 1000;
 
+const isStuckProcessingPayment = (payment: PaymentResponse) =>
+  payment.processing?.isStuck ??
+  (payment.status === PaymentStatus.PROCESSING &&
+    Date.now() - new Date(payment.updatedAt).getTime() >= STUCK_THRESHOLD_MS);
+
 const fetchDashboardPayments = async (): Promise<PaymentResponse[]> => {
   const allResults: PaymentResponse[] = [];
 
@@ -96,6 +101,8 @@ const Dashboard: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  const [recoveryAction, setRecoveryAction] = useState<{ paymentId: string; type: 'reconcile' | 'restart' } | null>(null);
+  const [recoveryError, setRecoveryError] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -161,9 +168,7 @@ const Dashboard: React.FC = () => {
     const processingPayments = filteredPayments.filter(
       (payment) => payment.status === PaymentStatus.PROCESSING
     );
-    const stuckPayments = processingPayments.filter(
-      (payment) => Date.now() - new Date(payment.updatedAt).getTime() >= STUCK_THRESHOLD_MS
-    );
+    const stuckPayments = processingPayments.filter(isStuckProcessingPayment);
     const succeededVolume = succeededPayments.reduce((sum, payment) => sum + Number(payment.amount), 0);
     const refundedVolume = refundedPayments.reduce((sum, payment) => sum + Number(payment.amount), 0);
     const completedRecoverableCount = succeededPayments.length + refundedPayments.length;
@@ -191,6 +196,14 @@ const Dashboard: React.FC = () => {
             new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime()
         )
         .slice(0, 5),
+    [filteredPayments]
+  );
+
+  const stuckPayments = useMemo(
+    () =>
+      filteredPayments
+        .filter((payment) => payment.status === PaymentStatus.PROCESSING && isStuckProcessingPayment(payment))
+        .sort((left, right) => new Date(left.updatedAt).getTime() - new Date(right.updatedAt).getTime()),
     [filteredPayments]
   );
 
@@ -250,6 +263,27 @@ const Dashboard: React.FC = () => {
       );
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleRecoveryAction = async (payment: PaymentResponse, type: 'reconcile' | 'restart') => {
+    setRecoveryError(null);
+    setRecoveryAction({ paymentId: payment.id, type });
+
+    try {
+      if (type === 'reconcile') {
+        await PaymentService.reconcileProcessingPayment(payment.id);
+      } else {
+        await PaymentService.restartProcessingPayment(payment.id);
+      }
+
+      const payments = await fetchDashboardPayments();
+      setAllPayments(payments);
+      setLastUpdatedAt(new Date().toISOString());
+    } catch (error: any) {
+      setRecoveryError(error.message || 'Recovery action failed. Please try again.');
+    } finally {
+      setRecoveryAction(null);
     }
   };
 
@@ -385,6 +419,81 @@ const Dashboard: React.FC = () => {
               </span>
             </div>
           </div>
+        </div>
+      )}
+
+      {stuckPayments.length > 0 && (
+        <div className="rounded-2xl border border-red-200 bg-gradient-to-r from-red-50 via-amber-50 to-white p-5 shadow-sm">
+          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-wide text-red-700">Processing Recovery Queue</p>
+              <h2 className="mt-1 text-xl font-bold text-slate-900">
+                {stuckPayments.length} stuck processing payment{stuckPayments.length === 1 ? '' : 's'} need manual attention
+              </h2>
+              <p className="mt-1 text-sm text-slate-600">
+                Payments with a gateway charge should be reconciled. Payments without one can be safely restarted.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2 text-sm">
+              <span className="rounded-full border border-red-200 bg-white px-3 py-1.5 font-medium text-red-700">
+                {stuckPayments.filter((payment) => payment.processing?.recovery?.canReconcile).length} reconcile
+              </span>
+              <span className="rounded-full border border-amber-200 bg-white px-3 py-1.5 font-medium text-amber-700">
+                {stuckPayments.filter((payment) => payment.processing?.recovery?.canRestart).length} restart
+              </span>
+            </div>
+          </div>
+          <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
+            {stuckPayments.slice(0, 4).map((payment) => {
+              const recovery = payment.processing?.recovery;
+              const activeAction =
+                recoveryAction?.paymentId === payment.id ? recoveryAction.type : null;
+
+              return (
+                <div key={payment.id} className="rounded-xl border border-red-200 bg-white p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-mono text-sm text-slate-900">{payment.orderId}</p>
+                      <p className="mt-1 text-xs text-slate-500">{payment.id}</p>
+                      <p className="mt-2 text-xs text-slate-600">
+                        {recovery?.message || 'This payment appears stuck in processing.'}
+                      </p>
+                    </div>
+                    <StatusBadge status={payment.status} size="sm" showIcon={true} />
+                  </div>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {recovery?.canReconcile && (
+                      <button
+                        onClick={() => handleRecoveryAction(payment, 'reconcile')}
+                        disabled={Boolean(activeAction)}
+                        className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-red-200"
+                      >
+                        <RefreshCw className={cn('h-4 w-4', activeAction === 'reconcile' && 'animate-spin')} />
+                        {activeAction === 'reconcile' ? 'Reconciling...' : 'Reconcile'}
+                      </button>
+                    )}
+                    {recovery?.canRestart && (
+                      <button
+                        onClick={() => handleRecoveryAction(payment, 'restart')}
+                        disabled={Boolean(activeAction)}
+                        className="inline-flex items-center gap-2 rounded-lg bg-amber-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-amber-700 disabled:cursor-not-allowed disabled:bg-amber-200"
+                      >
+                        <RotateCcw className={cn('h-4 w-4', activeAction === 'restart' && 'animate-spin')} />
+                        {activeAction === 'restart' ? 'Restarting...' : 'Restart'}
+                      </button>
+                    )}
+                    <Link
+                      to={`/payment/${payment.id}`}
+                      className="inline-flex items-center rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
+                    >
+                      Review
+                    </Link>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {recoveryError && <p className="mt-3 text-sm text-red-700">{recoveryError}</p>}
         </div>
       )}
 
@@ -575,9 +684,7 @@ const Dashboard: React.FC = () => {
           ) : (
             <div className="space-y-3">
               {recentActivity.map((payment) => {
-                const ageMs = Date.now() - new Date(payment.updatedAt).getTime();
-                const isLikelyStuck =
-                  payment.status === PaymentStatus.PROCESSING && ageMs >= STUCK_THRESHOLD_MS;
+                const isLikelyStuck = isStuckProcessingPayment(payment);
                 const isRefundedPayment = payment.status === PaymentStatus.REFUNDED;
 
                 return (
@@ -681,6 +788,10 @@ const Dashboard: React.FC = () => {
                 <tbody className="divide-y divide-slate-100">
                   {filteredPayments.slice(0, 20).map((payment) => {
                     const isRefundedPayment = payment.status === PaymentStatus.REFUNDED;
+                    const isLikelyStuck = isStuckProcessingPayment(payment);
+                    const recovery = payment.processing?.recovery;
+                    const activeAction =
+                      recoveryAction?.paymentId === payment.id ? recoveryAction.type : null;
 
                     return (
                     <tr
@@ -704,21 +815,42 @@ const Dashboard: React.FC = () => {
                         {isRefundedPayment && (
                           <div className="mt-1 text-xs font-medium text-orange-700">Refund completed</div>
                         )}
-                        {payment.status === PaymentStatus.PROCESSING &&
-                          Date.now() - new Date(payment.updatedAt).getTime() >= STUCK_THRESHOLD_MS && (
-                            <div className="mt-1 text-xs font-medium text-red-600">Likely stuck</div>
-                          )}
+                        {payment.status === PaymentStatus.PROCESSING && isLikelyStuck && (
+                          <div className="mt-1 text-xs font-medium text-red-600">
+                            {recovery?.canReconcile ? 'Needs reconcile' : recovery?.canRestart ? 'Needs restart' : 'Likely stuck'}
+                          </div>
+                        )}
                       </td>
                       <td className="py-3 text-sm text-slate-600">
                         {new Date(payment.createdAt).toLocaleString()}
                       </td>
                       <td className="py-3">
-                        <Link
-                          to={`/payment/${payment.id}`}
-                          className="text-sm font-medium text-brand-600 hover:text-brand-700"
-                        >
-                          View
-                        </Link>
+                        <div className="flex flex-wrap items-center gap-3">
+                          {recovery?.canReconcile && (
+                            <button
+                              onClick={() => handleRecoveryAction(payment, 'reconcile')}
+                              disabled={Boolean(activeAction)}
+                              className="text-sm font-medium text-red-600 hover:text-red-700 disabled:cursor-not-allowed disabled:text-red-300"
+                            >
+                              {activeAction === 'reconcile' ? 'Reconciling...' : 'Reconcile'}
+                            </button>
+                          )}
+                          {recovery?.canRestart && (
+                            <button
+                              onClick={() => handleRecoveryAction(payment, 'restart')}
+                              disabled={Boolean(activeAction)}
+                              className="text-sm font-medium text-amber-600 hover:text-amber-700 disabled:cursor-not-allowed disabled:text-amber-300"
+                            >
+                              {activeAction === 'restart' ? 'Restarting...' : 'Restart'}
+                            </button>
+                          )}
+                          <Link
+                            to={`/payment/${payment.id}`}
+                            className="text-sm font-medium text-brand-600 hover:text-brand-700"
+                          >
+                            View
+                          </Link>
+                        </div>
                       </td>
                     </tr>
                   )})}

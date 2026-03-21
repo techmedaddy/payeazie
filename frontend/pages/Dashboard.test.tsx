@@ -8,6 +8,8 @@ import { PaymentStatus } from '../types';
 vi.mock('../services/payments', () => ({
   PaymentService: {
     listPayments: vi.fn(),
+    reconcileProcessingPayment: vi.fn(),
+    restartProcessingPayment: vi.fn(),
   },
 }));
 
@@ -37,6 +39,22 @@ describe('Dashboard', () => {
         status: PaymentStatus.PROCESSING,
         createdAt: '2026-01-07T10:00:00Z',
         updatedAt: '2026-01-07T10:00:00Z',
+        processing: {
+          active: true,
+          startedAt: '2026-01-07T10:00:00Z',
+          elapsedSeconds: 120,
+          thresholdSeconds: 60,
+          isStuck: true,
+          hasGatewayCharge: true,
+          stuckSince: '2026-01-07T10:01:00Z',
+          recovery: {
+            eligible: true,
+            state: 'reconcile',
+            canReconcile: true,
+            canRestart: false,
+            message: 'The payment looks stuck. Reconcile with the gateway to confirm the final outcome.',
+          },
+        },
       },
       {
         id: 'pay-2',
@@ -111,6 +129,18 @@ describe('Dashboard', () => {
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'refunded' })).toBeInTheDocument();
     });
+  });
+
+  it('surfaces stuck processing recovery actions', async () => {
+    vi.mocked(PaymentService.listPayments).mockResolvedValue(mockListResponse);
+
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByText('Processing Recovery Queue')).toBeInTheDocument();
+    });
+
+    expect(screen.getAllByText('Reconcile').length).toBeGreaterThan(0);
   });
 
   it('handles failed API calls gracefully', async () => {

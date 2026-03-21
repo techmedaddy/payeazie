@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuthContext } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
 import { Loader2, UserPlus, Mail, Lock, User, AlertCircle, CheckCircle2 } from 'lucide-react';
 import Logo from '../components/Logo';
 
 const Register: React.FC = () => {
   const navigate = useNavigate();
   const { register } = useAuthContext();
+  const { showToast } = useToast();
   
   const [formData, setFormData] = useState({
     name: '',
@@ -19,8 +21,8 @@ const Register: React.FC = () => {
   const [success, setSuccess] = useState(false);
 
   const validatePassword = () => {
-    if (formData.password.length < 6) {
-      return 'Password must be at least 6 characters';
+    if (formData.password.length < 8) {
+      return 'Password must be at least 8 characters';
     }
     if (formData.password !== formData.confirmPassword) {
       return 'Passwords do not match';
@@ -41,13 +43,18 @@ const Register: React.FC = () => {
     setLoading(true);
 
     try {
-      await register(formData.name, formData.email, formData.password);
+      await register(formData.name.trim(), formData.email.trim(), formData.password);
+      showToast('Account created successfully. Redirecting to sign in.', 'success');
       setSuccess(true);
       setTimeout(() => {
-        navigate('/login');
+        navigate('/login?registered=success');
       }, 2000);
     } catch (err: any) {
-      setError(err.message || 'Registration failed. Please try again.');
+      const nextError =
+        err.statusCode === 409
+          ? 'An account already exists with that email address.'
+          : err.message || 'Registration failed. Please try again.';
+      setError(nextError);
     } finally {
       setLoading(false);
     }
@@ -152,12 +159,15 @@ const Register: React.FC = () => {
                   value={formData.password}
                   onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                   className="w-full pl-10 pr-4 py-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                  placeholder="At least 6 characters"
+                  placeholder="At least 8 characters"
                   required
                   disabled={loading}
-                  minLength={6}
+                  minLength={8}
                 />
               </div>
+              <p className="mt-2 text-xs text-slate-500">
+                Use at least 8 characters to match the account security rules.
+              </p>
             </div>
 
             {/* Confirm Password */}

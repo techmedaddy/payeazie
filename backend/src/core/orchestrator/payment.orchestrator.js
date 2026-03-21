@@ -78,6 +78,12 @@ const fetchStatus = async (paymentId) => {
 const transitionStatus = (paymentId, newStatus, metadata = {}, userId = null, triggeredBy = 'user') => 
     applyStatus(paymentId, newStatus, metadata, userId, triggeredBy);
 
+const retryPayment = (paymentId, metadata = {}, userId = null, triggeredBy = 'user') =>
+    statusTransitionService.retryPayment(paymentId, metadata, userId, triggeredBy);
+
+const restartProcessingPayment = (paymentId, metadata = {}, userId = null, triggeredBy = 'user') =>
+    statusTransitionService.restartProcessingPayment(paymentId, metadata, userId, triggeredBy);
+
 const applyGatewayResult = (paymentId, gatewayResult = {}) => {
     if (!gatewayResult.status && !gatewayResult.id) {
         throw new Error('gatewayResult requires status or id');
@@ -93,6 +99,8 @@ module.exports = {
     attachGatewayCharge,
     fetchStatus,
     transitionStatus,
+    retryPayment,
+    restartProcessingPayment,
     applyGatewayResult,
     InvalidTransitionError,
     NotFoundError

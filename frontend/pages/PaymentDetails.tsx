@@ -41,6 +41,18 @@ const formatDateTime = (timestamp: string) =>
     timeStyle: 'short',
   });
 
+const getOperationBadgeClassName = (operationSource: string) => {
+  if (operationSource === 'admin_triggered') {
+    return 'border-violet-200 bg-violet-50 text-violet-700';
+  }
+
+  if (operationSource === 'user_triggered') {
+    return 'border-sky-200 bg-sky-50 text-sky-700';
+  }
+
+  return 'border-slate-200 bg-slate-50 text-slate-700';
+};
+
 const PaymentDetails: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const { payment, loading, error, notFound, refetch, elapsedTime } = usePaymentDetails(id || '');
@@ -50,6 +62,10 @@ const PaymentDetails: React.FC = () => {
   const [refundInFlight, setRefundInFlight] = useState(false);
   const [refundError, setRefundError] = useState<string | null>(null);
   const [refundReasonInput, setRefundReasonInput] = useState('');
+  const [retryInFlight, setRetryInFlight] = useState(false);
+  const [retryError, setRetryError] = useState<string | null>(null);
+  const [recoveryActionInFlight, setRecoveryActionInFlight] = useState<'reconcile' | 'restart' | null>(null);
+  const [recoveryError, setRecoveryError] = useState<string | null>(null);
 
   const filteredAndSortedAuditLog = useMemo(() => {
     if (!payment?.auditLog.length) return [];
@@ -136,8 +152,16 @@ const PaymentDetails: React.FC = () => {
   const isFailed = status === 'failed';
   const isProcessing = status === 'processing';
   const isRefunded = status === 'refunded';
+  const processingState = payment.processing;
+  const processingRecovery = payment.processing?.recovery;
+  const isStuckProcessing = Boolean(processingState?.isStuck);
   const refundReason = refundReasonInput.trim();
   const canRefund = Boolean(payment.refund?.eligible && !refundInFlight && refundReason.length >= 5);
+  const canRetry = Boolean(payment.retry?.eligible && !retryInFlight);
+  const canReconcileProcessing = Boolean(processingRecovery?.canReconcile && !recoveryActionInFlight);
+  const canRestartProcessing = Boolean(processingRecovery?.canRestart && !recoveryActionInFlight);
+  const showRefundSafetyCard = Boolean(!payment.refundDetails && payment.refund && !payment.refund.eligible);
+  const showRetrySafetyCard = Boolean(payment.retry && !payment.retry.eligible && !isFailed);
 
   const handleRefund = async () => {
     if (!payment.refund?.eligible || refundInFlight) return;
@@ -161,6 +185,69 @@ const PaymentDetails: React.FC = () => {
       setRefundError(err.message || 'Refund failed. Please try again.');
     } finally {
       setRefundInFlight(false);
+    }
+  };
+
+  const handleRetry = async () => {
+    if (!payment.retry?.eligible || retryInFlight) return;
+
+    const confirmed = window.confirm(
+      `Retry payment ${payment.orderId}? This will requeue the failed payment for another processing attempt.`
+    );
+
+    if (!confirmed) return;
+
+    try {
+      setRetryError(null);
+      setRetryInFlight(true);
+      await PaymentService.retryPayment(payment.id);
+      await refetch();
+    } catch (err: any) {
+      setRetryError(err.message || 'Retry failed. Please try again.');
+    } finally {
+      setRetryInFlight(false);
+    }
+  };
+
+  const handleReconcileProcessing = async () => {
+    if (!processingRecovery?.canReconcile || recoveryActionInFlight) return;
+
+    const confirmed = window.confirm(
+      `Reconcile payment ${payment.orderId}? This will query the gateway and apply the latest final status.`
+    );
+
+    if (!confirmed) return;
+
+    try {
+      setRecoveryError(null);
+      setRecoveryActionInFlight('reconcile');
+      await PaymentService.reconcileProcessingPayment(payment.id);
+      await refetch();
+    } catch (err: any) {
+      setRecoveryError(err.message || 'Reconciliation failed. Please try again.');
+    } finally {
+      setRecoveryActionInFlight(null);
+    }
+  };
+
+  const handleRestartProcessing = async () => {
+    if (!processingRecovery?.canRestart || recoveryActionInFlight) return;
+
+    const confirmed = window.confirm(
+      `Restart processing for ${payment.orderId}? This is only safe because no gateway charge has been recorded for this stuck payment.`
+    );
+
+    if (!confirmed) return;
+
+    try {
+      setRecoveryError(null);
+      setRecoveryActionInFlight('restart');
+      await PaymentService.restartProcessingPayment(payment.id);
+      await refetch();
+    } catch (err: any) {
+      setRecoveryError(err.message || 'Restart failed. Please try again.');
+    } finally {
+      setRecoveryActionInFlight(null);
     }
   };
 
@@ -219,7 +306,7 @@ const PaymentDetails: React.FC = () => {
               </div>
             </div>
 
-            {isProcessing && (
+            {isProcessing && !isStuckProcessing && (
               <div className="flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4">
                 <Loader2 className="h-5 w-5 shrink-0 animate-spin text-amber-600" />
                 <div className="flex-1">
@@ -236,34 +323,155 @@ const PaymentDetails: React.FC = () => {
               </div>
             )}
 
-            {payment.failureDetails && (
-              <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-4">
-                <div className="flex items-start gap-3">
-                  <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
-                  <div className="space-y-1">
-                    <p className="text-sm font-semibold text-red-900">Failure Summary</p>
-                    <p className="text-sm text-red-800">{payment.failureDetails.reason}</p>
-                    <div className="flex flex-wrap gap-2 pt-2 text-xs">
-                      {payment.failureDetails.code && (
-                        <span className="rounded-full border border-red-300 bg-white px-2 py-1 text-red-700">
-                          Code: {payment.failureDetails.code}
-                        </span>
-                      )}
-                      {payment.failureDetails.worker && (
-                        <span className="rounded-full border border-red-300 bg-white px-2 py-1 text-red-700">
-                          Worker: {payment.failureDetails.worker}
-                        </span>
-                      )}
-                      {payment.failureDetails.jobId && (
-                        <span className="rounded-full border border-red-300 bg-white px-2 py-1 font-mono text-red-700">
-                          Job: {payment.failureDetails.jobId}
-                        </span>
-                      )}
-                      <span className="rounded-full border border-red-300 bg-white px-2 py-1 text-red-700">
-                        Failed at: {formatDateTime(payment.failureDetails.failedAt)}
-                      </span>
+            {isProcessing && isStuckProcessing && (
+              <div className="rounded-xl border border-red-200 bg-gradient-to-r from-red-50 via-amber-50 to-white p-5">
+                <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                  <div className="flex items-start gap-3">
+                    <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
+                    <div className="space-y-1">
+                      <p className="text-sm font-semibold uppercase tracking-wide text-red-700">Processing Recovery Needed</p>
+                      <p className="text-lg font-bold text-slate-900">
+                        This payment has been processing for {processingState?.elapsedSeconds || elapsedTime}s.
+                      </p>
+                      <p className="text-sm text-slate-700">{processingRecovery?.message}</p>
                     </div>
                   </div>
+
+                  <div className="grid grid-cols-1 gap-2 text-sm md:min-w-80">
+                    <div className="rounded-lg border border-red-200 bg-white px-3 py-2">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-red-700">Started</p>
+                      <p className="mt-1 font-medium text-slate-900">
+                        {processingState?.startedAt ? formatDateTime(processingState.startedAt) : 'Unknown'}
+                      </p>
+                    </div>
+                    <div className="rounded-lg border border-red-200 bg-white px-3 py-2">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-red-700">Gateway Charge</p>
+                      <p className="mt-1 font-medium text-slate-900">
+                        {processingState?.hasGatewayCharge ? 'Recorded' : 'Not recorded'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-4 flex flex-wrap gap-3">
+                  {processingRecovery?.canReconcile && (
+                    <button
+                      onClick={handleReconcileProcessing}
+                      disabled={!canReconcileProcessing}
+                      className={cn(
+                        'inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors',
+                        canReconcileProcessing
+                          ? 'bg-red-600 text-white hover:bg-red-700'
+                          : 'cursor-not-allowed bg-red-100 text-red-500'
+                      )}
+                    >
+                      <RefreshCw className={cn('h-4 w-4', recoveryActionInFlight === 'reconcile' && 'animate-spin')} />
+                      {recoveryActionInFlight === 'reconcile' ? 'Reconciling...' : 'Reconcile Now'}
+                    </button>
+                  )}
+                  {processingRecovery?.canRestart && (
+                    <button
+                      onClick={handleRestartProcessing}
+                      disabled={!canRestartProcessing}
+                      className={cn(
+                        'inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors',
+                        canRestartProcessing
+                          ? 'bg-amber-600 text-white hover:bg-amber-700'
+                          : 'cursor-not-allowed bg-amber-100 text-amber-500'
+                      )}
+                    >
+                      <RotateCcw className={cn('h-4 w-4', recoveryActionInFlight === 'restart' && 'animate-spin')} />
+                      {recoveryActionInFlight === 'restart' ? 'Restarting...' : 'Restart Processing'}
+                    </button>
+                  )}
+                  <button
+                    onClick={() => refetch()}
+                    className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
+                  >
+                    <RefreshCw className="h-4 w-4" />
+                    Refresh Status
+                  </button>
+                </div>
+
+                {recoveryError && <p className="mt-3 text-sm text-red-700">{recoveryError}</p>}
+              </div>
+            )}
+
+            {payment.failureDetails && (
+              <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-4">
+                <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                  <div className="flex items-start gap-3">
+                    <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
+                    <div className="space-y-1">
+                      <p className="text-sm font-semibold text-red-900">Failure Summary</p>
+                      <p className="text-sm text-red-800">{payment.failureDetails.reason}</p>
+                      <div className="flex flex-wrap gap-2 pt-2 text-xs">
+                        {payment.failureDetails.code && (
+                          <span className="rounded-full border border-red-300 bg-white px-2 py-1 text-red-700">
+                            Code: {payment.failureDetails.code}
+                          </span>
+                        )}
+                        {payment.failureDetails.worker && (
+                          <span className="rounded-full border border-red-300 bg-white px-2 py-1 text-red-700">
+                            Worker: {payment.failureDetails.worker}
+                          </span>
+                        )}
+                        {payment.failureDetails.jobId && (
+                          <span className="rounded-full border border-red-300 bg-white px-2 py-1 font-mono text-red-700">
+                            Job: {payment.failureDetails.jobId}
+                          </span>
+                        )}
+                        <span className="rounded-full border border-red-300 bg-white px-2 py-1 text-red-700">
+                          Failed at: {formatDateTime(payment.failureDetails.failedAt)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {payment.retry ? (
+                    <div className="rounded-xl border border-red-200 bg-white p-4 md:min-w-[280px]">
+                      <div className="flex items-start gap-3">
+                        <RotateCcw className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
+                        <div className="space-y-1">
+                          <p className="text-sm font-semibold text-slate-900">Retry Payment</p>
+                          <p className="text-sm text-slate-600">
+                            Attempt {Math.min(payment.retry.attemptsUsed + 1, payment.retry.maxAttempts)} of{' '}
+                            {payment.retry.maxAttempts}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="mt-3 space-y-2 text-sm text-slate-700">
+                        <p>{payment.retry.message}</p>
+                        <p>
+                          {payment.retry.attemptsRemaining} attempt
+                          {payment.retry.attemptsRemaining === 1 ? '' : 's'} remaining
+                        </p>
+                        {payment.retry.availableAt && payment.retry.state === 'cooldown' && (
+                          <p>Available again at {formatDateTime(payment.retry.availableAt)}</p>
+                        )}
+                        {payment.retry.lastRetriedAt && (
+                          <p>Last retried at {formatDateTime(payment.retry.lastRetriedAt)}</p>
+                        )}
+                      </div>
+
+                      <button
+                        onClick={handleRetry}
+                        disabled={!canRetry}
+                        className={cn(
+                          'mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors',
+                          canRetry
+                            ? 'bg-red-600 text-white hover:bg-red-700'
+                            : 'cursor-not-allowed bg-red-100 text-red-500'
+                        )}
+                      >
+                        <RotateCcw className={cn('h-4 w-4', retryInFlight && 'animate-spin')} />
+                        {retryInFlight ? 'Retrying...' : 'Retry Payment'}
+                      </button>
+
+                      {retryError && <p className="mt-3 text-sm text-red-700">{retryError}</p>}
+                    </div>
+                  ) : null}
                 </div>
               </div>
             )}
@@ -365,6 +573,36 @@ const PaymentDetails: React.FC = () => {
                 {refundError && (
                   <p className="mt-3 text-sm text-red-700">{refundError}</p>
                 )}
+              </div>
+            )}
+
+            {(showRefundSafetyCard || showRetrySafetyCard) && (
+              <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <p className="text-sm font-semibold uppercase tracking-wide text-slate-700">Action Guardrails</p>
+                <div className="mt-3 grid gap-3 md:grid-cols-2">
+                  {showRefundSafetyCard && (
+                    <div className="rounded-lg border border-slate-200 bg-white p-4">
+                      <div className="flex items-start gap-3">
+                        <RotateCcw className="mt-0.5 h-5 w-5 shrink-0 text-slate-500" />
+                        <div>
+                          <p className="text-sm font-semibold text-slate-900">Refund unavailable</p>
+                          <p className="mt-1 text-sm text-slate-600">{payment.refund?.message}</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {showRetrySafetyCard && (
+                    <div className="rounded-lg border border-slate-200 bg-white p-4">
+                      <div className="flex items-start gap-3">
+                        <RotateCcw className="mt-0.5 h-5 w-5 shrink-0 text-slate-500" />
+                        <div>
+                          <p className="text-sm font-semibold text-slate-900">Retry unavailable</p>
+                          <p className="mt-1 text-sm text-slate-600">{payment.retry?.message}</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>
@@ -510,7 +748,32 @@ const PaymentDetails: React.FC = () => {
                     {payment.latestActivity?.summary || 'No activity recorded'}
                   </p>
                   {payment.latestActivity && (
-                    <p className="mt-1 text-xs text-slate-500">{formatDateTime(payment.latestActivity.createdAt)}</p>
+                    <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                      <span>{formatDateTime(payment.latestActivity.createdAt)}</span>
+                      <span
+                        className={cn(
+                          'rounded-full border px-2 py-0.5 font-medium',
+                          getOperationBadgeClassName(payment.latestActivity.operationSource)
+                        )}
+                      >
+                        {payment.latestActivity.operationLabel}
+                      </span>
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <p className="text-slate-500">Processing Health</p>
+                  <p className="font-medium text-slate-900">
+                    {payment.processing?.active
+                      ? payment.processing.isStuck
+                        ? 'Stuck - manual recovery available'
+                        : 'Healthy processing'
+                      : 'Not processing'}
+                  </p>
+                  {payment.processing?.active && payment.processing.startedAt && (
+                    <p className="mt-1 text-xs text-slate-500">
+                      Started {formatDateTime(payment.processing.startedAt)}
+                    </p>
                   )}
                 </div>
                 <div>
@@ -522,8 +785,29 @@ const PaymentDetails: React.FC = () => {
                         ? 'Eligible for refund'
                         : 'Not eligible for refund'}
                   </p>
+                  {payment.refund?.message && (
+                    <p className="mt-1 text-xs text-slate-500">{payment.refund.message}</p>
+                  )}
                   {payment.refund?.refundedAt && (
                     <p className="mt-1 text-xs text-slate-500">{formatDateTime(payment.refund.refundedAt)}</p>
+                  )}
+                </div>
+                <div>
+                  <p className="text-slate-500">Retry Status</p>
+                  <p className="font-medium text-slate-900">
+                    {payment.retry?.eligible
+                      ? `Ready for retry (${payment.retry.attemptsRemaining} remaining)`
+                      : payment.retry?.state === 'cooldown'
+                        ? 'Retry cooling down'
+                        : payment.retry?.state === 'exhausted'
+                          ? 'Retry limit reached'
+                          : 'Not retryable'}
+                  </p>
+                  {payment.retry?.message && (
+                    <p className="mt-1 text-xs text-slate-500">{payment.retry.message}</p>
+                  )}
+                  {payment.retry?.availableAt && payment.retry.state === 'cooldown' && (
+                    <p className="mt-1 text-xs text-slate-500">{formatDateTime(payment.retry.availableAt)}</p>
                   )}
                 </div>
                 {payment.refundDetails && (
@@ -609,6 +893,14 @@ const PaymentDetails: React.FC = () => {
                               From {toTitleCase(entry.fromStatus)}
                             </span>
                           )}
+                          <span
+                            className={cn(
+                              'rounded-full border px-2 py-1 text-xs font-medium',
+                              getOperationBadgeClassName(entry.operationSource)
+                            )}
+                          >
+                            {entry.operationLabel}
+                          </span>
                           <span className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-600">
                             Source: {toTitleCase(entry.triggeredBy)}
                           </span>
@@ -680,11 +972,56 @@ const PaymentDetails: React.FC = () => {
             <button
               onClick={() => refetch()}
               className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-4 py-2 font-medium text-slate-700 transition-colors hover:bg-slate-50"
-              disabled={isProcessing || refundInFlight}
+              disabled={refundInFlight || retryInFlight || Boolean(recoveryActionInFlight)}
             >
-              <RefreshCw className={cn('h-4 w-4', (isProcessing || refundInFlight) && 'animate-spin')} />
+              <RefreshCw className={cn('h-4 w-4', (refundInFlight || retryInFlight || recoveryActionInFlight) && 'animate-spin')} />
               Refresh
             </button>
+            {isProcessing && processingRecovery?.canReconcile && (
+              <button
+                onClick={handleReconcileProcessing}
+                disabled={!canReconcileProcessing}
+                className={cn(
+                  'inline-flex items-center gap-2 rounded-lg px-4 py-2 font-medium transition-colors',
+                  canReconcileProcessing
+                    ? 'bg-red-600 text-white hover:bg-red-700'
+                    : 'cursor-not-allowed bg-red-100 text-red-500'
+                )}
+              >
+                <RefreshCw className={cn('h-4 w-4', recoveryActionInFlight === 'reconcile' && 'animate-spin')} />
+                {recoveryActionInFlight === 'reconcile' ? 'Reconciling...' : 'Reconcile Payment'}
+              </button>
+            )}
+            {isProcessing && processingRecovery?.canRestart && (
+              <button
+                onClick={handleRestartProcessing}
+                disabled={!canRestartProcessing}
+                className={cn(
+                  'inline-flex items-center gap-2 rounded-lg px-4 py-2 font-medium transition-colors',
+                  canRestartProcessing
+                    ? 'bg-amber-600 text-white hover:bg-amber-700'
+                    : 'cursor-not-allowed bg-amber-100 text-amber-500'
+                )}
+              >
+                <RotateCcw className={cn('h-4 w-4', recoveryActionInFlight === 'restart' && 'animate-spin')} />
+                {recoveryActionInFlight === 'restart' ? 'Restarting...' : 'Restart Processing'}
+              </button>
+            )}
+            {isFailed && payment.retry && (
+              <button
+                onClick={handleRetry}
+                disabled={!canRetry}
+                className={cn(
+                  'inline-flex items-center gap-2 rounded-lg px-4 py-2 font-medium transition-colors',
+                  canRetry
+                    ? 'bg-red-600 text-white hover:bg-red-700'
+                    : 'cursor-not-allowed bg-red-100 text-red-500'
+                )}
+              >
+                <RotateCcw className={cn('h-4 w-4', retryInFlight && 'animate-spin')} />
+                {retryInFlight ? 'Retrying...' : 'Retry Failed Payment'}
+              </button>
+            )}
             <Link
               to="/create"
               className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 font-medium text-white transition-colors hover:bg-brand-700"

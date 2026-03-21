@@ -7,6 +7,8 @@ interface RequestOptions extends RequestInit {
   idempotencyKey?: string;
 }
 
+const AUTH_REDIRECT_REASON_KEY = 'payeazie.authRedirectReason';
+
 function shouldRetryRequest(method: string | undefined, error: ApiError | { statusCode?: number } | undefined): boolean {
   const normalizedMethod = (method || 'GET').toUpperCase();
 
@@ -34,11 +36,36 @@ function getHashRoute(): string {
 function redirectToLogin(): void {
   const currentRoute = getHashRoute();
 
-  if (currentRoute.startsWith('/login') || currentRoute.startsWith('/register')) {
+  if (
+    currentRoute.startsWith('/login') ||
+    currentRoute.startsWith('/register') ||
+    currentRoute.startsWith('/forgot-password') ||
+    currentRoute.startsWith('/reset-password')
+  ) {
     return;
   }
 
   window.location.replace(`${window.location.origin}/#/login`);
+}
+
+function setAuthRedirectReason(reason: 'session_expired' | 'login_required'): void {
+  try {
+    sessionStorage.setItem(AUTH_REDIRECT_REASON_KEY, reason);
+  } catch {
+    // Ignore storage errors and fall back to redirect only.
+  }
+}
+
+function consumeAuthRedirectReason(): string | null {
+  try {
+    const reason = sessionStorage.getItem(AUTH_REDIRECT_REASON_KEY);
+    if (reason) {
+      sessionStorage.removeItem(AUTH_REDIRECT_REASON_KEY);
+    }
+    return reason;
+  } catch {
+    return null;
+  }
 }
 
 async function fetchWithRetry<T>(url: string, options: RequestOptions = {}, retries = MAX_RETRIES): Promise<T> {
@@ -71,8 +98,10 @@ async function fetchWithRetry<T>(url: string, options: RequestOptions = {}, retr
         // Check if it's a token expiry
         if (errorData.message && errorData.message.toLowerCase().includes('expired')) {
           console.error('❌ Token expired, redirecting to login');
+          setAuthRedirectReason('session_expired');
         } else {
           console.warn('❌ 401 Unauthorized - Redirecting to login');
+          setAuthRedirectReason('login_required');
         }
         
         localStorage.removeItem('authToken');
@@ -120,4 +149,5 @@ export const api = {
   setAuthToken: (token: string) => localStorage.setItem('authToken', token),
   clearAuthToken: () => localStorage.removeItem('authToken'),
   getAuthToken,
+  consumeAuthRedirectReason,
 };
