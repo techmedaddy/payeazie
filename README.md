@@ -3,6 +3,9 @@
 Payeazie is a full-stack payment operations application built around a simple but realistic payment lifecycle: create a payment, process it asynchronously, reconcile long-running states, expose audit history, and give internal operators a controlled way to intervene when something goes wrong.
 
 The current repository sits between a prototype and a productized internal tool. It has enough operational behavior to model real payment workflows, while still using a mock gateway and local-first infrastructure so the system is easy to run, inspect, and extend.
+<img width="1913" height="987" alt="image" src="https://github.com/user-attachments/assets/f242554d-65bc-41bf-ab4b-13c0f6ddbeb5" />
+<img width="1913" height="987" alt="image" src="https://github.com/user-attachments/assets/83636615-57bd-4457-9afa-3956698119d3" />
+
 
 ## What The Project Covers
 
@@ -100,6 +103,10 @@ Merchants primarily see their own payments. Internal operators with `admin` or `
 ### 6. Local-first infrastructure
 
 The stack assumes PostgreSQL and Redis are available locally. The gateway is mocked by default, which keeps the project runnable without third-party payment credentials.
+
+<img width="1913" height="987" alt="image" src="https://github.com/user-attachments/assets/c29197db-5808-4f8e-b044-2fe09960ca48" />
+<img width="1913" height="987" alt="image" src="https://github.com/user-attachments/assets/e5931b80-c8ee-438e-9d6c-cc3dbf148459" />
+
 
 ## End-To-End Payment Flow
 
