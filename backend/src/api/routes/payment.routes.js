@@ -3,6 +3,11 @@ const webhookController = require('../controllers/webhook.controller');
 const sseController = require('../controllers/sse.controller');
 const { authMiddleware } = require('../middleware/auth.middleware');
 
+const isDevelopment = process.env.NODE_ENV !== 'production';
+const createPaymentRateLimit = isDevelopment
+  ? { max: 60, timeWindow: '1 minute' }
+  : { max: 10, timeWindow: '1 minute' };
+
 /**
  * Backward compatibility for legacy controller method names
  */
@@ -35,7 +40,21 @@ const createIntentSchema = {
     properties: {
       orderId: { type: 'string', minLength: 1 },
       amount: { type: 'number', minimum: 1 },
-      currency: { type: 'string', minLength: 3, maxLength: 3 }
+      currency: { type: 'string', minLength: 3, maxLength: 3 },
+      demo: {
+        type: 'object',
+        properties: {
+          outcome: {
+            type: 'string',
+            enum: ['auto', 'success', 'failure']
+          },
+          processingSpeed: {
+            type: 'string',
+            enum: ['normal', 'slow']
+          }
+        },
+        additionalProperties: false
+      }
     },
     additionalProperties: true
   },
@@ -105,7 +124,21 @@ const createPaymentSchema = {
     properties: {
       orderId: { type: 'string', minLength: 1 },
       amount: { type: 'number', minimum: 0.01 },
-      currency: { type: 'string', minLength: 3, maxLength: 3 }
+      currency: { type: 'string', minLength: 3, maxLength: 3 },
+      demo: {
+        type: 'object',
+        properties: {
+          outcome: {
+            type: 'string',
+            enum: ['auto', 'success', 'failure']
+          },
+          processingSpeed: {
+            type: 'string',
+            enum: ['normal', 'slow']
+          }
+        },
+        additionalProperties: false
+      }
     },
     additionalProperties: false
   }
@@ -150,7 +183,7 @@ module.exports = async function paymentRoutes(fastify) {
     { 
       schema: createPaymentSchema,
       preHandler: [authMiddleware],
-      config: { rateLimit: { max: 5, timeWindow: '1 hour' } }
+      config: { rateLimit: createPaymentRateLimit }
     },
     paymentController.createPayment
   );
@@ -165,7 +198,7 @@ module.exports = async function paymentRoutes(fastify) {
     { 
       schema: createIntentSchema,
       preHandler: [authMiddleware],
-      config: { rateLimit: { max: 5, timeWindow: '1 hour' } }
+      config: { rateLimit: createPaymentRateLimit }
     },
     paymentController.createIntent
   );

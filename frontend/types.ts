@@ -9,6 +9,10 @@ export interface PaymentIntentRequest {
   orderId: string;
   amount: number;
   currency: string;
+  demo?: {
+    outcome: 'auto' | 'success' | 'failure';
+    processingSpeed: 'normal' | 'slow';
+  };
 }
 
 export interface PaymentResponse {

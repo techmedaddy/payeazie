@@ -7,11 +7,38 @@ interface RequestOptions extends RequestInit {
   idempotencyKey?: string;
 }
 
+function shouldRetryRequest(method: string | undefined, error: ApiError | { statusCode?: number } | undefined): boolean {
+  const normalizedMethod = (method || 'GET').toUpperCase();
+
+  if (normalizedMethod !== 'GET') {
+    return false;
+  }
+
+  const statusCode = error?.statusCode;
+  return !statusCode || statusCode >= 500 || statusCode === 429;
+}
+
 /**
  * Get authentication token from localStorage
  */
 function getAuthToken(): string | null {
   return localStorage.getItem('authToken');
+}
+
+function getHashRoute(): string {
+  const hash = window.location.hash || '';
+  const normalized = hash.startsWith('#') ? hash.slice(1) : hash;
+  return normalized || '/';
+}
+
+function redirectToLogin(): void {
+  const currentRoute = getHashRoute();
+
+  if (currentRoute.startsWith('/login') || currentRoute.startsWith('/register')) {
+    return;
+  }
+
+  window.location.replace(`${window.location.origin}/#/login`);
 }
 
 async function fetchWithRetry<T>(url: string, options: RequestOptions = {}, retries = MAX_RETRIES): Promise<T> {
@@ -49,10 +76,7 @@ async function fetchWithRetry<T>(url: string, options: RequestOptions = {}, retr
         }
         
         localStorage.removeItem('authToken');
-        // Only redirect if not already on login/register page
-        if (!window.location.pathname.includes('/login') && !window.location.pathname.includes('/register')) {
-          window.location.href = '/login';
-        }
+        redirectToLogin();
         throw { message: errorData.message || 'Unauthorized', statusCode: 401 } as ApiError;
       }
       
@@ -67,12 +91,16 @@ async function fetchWithRetry<T>(url: string, options: RequestOptions = {}, retr
            error: errorData.error
          } as ApiError;
       }
-      throw { message: response.statusText, statusCode: response.status };
+      const errorData = await response.json().catch(() => ({ message: response.statusText }));
+      throw {
+        message: errorData.message || response.statusText,
+        statusCode: response.status,
+      } as ApiError;
     }
 
     return await response.json();
   } catch (error: any) {
-    if (retries > 0 && (!error.statusCode || error.statusCode >= 500 || error.statusCode === 429)) {
+    if (retries > 0 && shouldRetryRequest(options.method, error)) {
       const delay = Math.pow(2, MAX_RETRIES - retries) * 1000; // Exponential backoff: 1s, 2s, 4s
       await new Promise(resolve => setTimeout(resolve, delay));
       return fetchWithRetry<T>(url, options, retries - 1);

@@ -58,7 +58,7 @@ const normalizePayment = (row = {}) => ({
     amount: row.amount !== undefined ? Number(row.amount) : row.amount
 });
 
-const enqueueChargeJob = async (paymentId) => {
+const enqueueChargeJob = async (paymentId, demo = { outcome: 'auto', processingSpeed: 'normal' }) => {
     if (!paymentId) {
         logger.warn('enqueueChargeJob: no paymentId provided');
         return;
@@ -70,12 +70,12 @@ const enqueueChargeJob = async (paymentId) => {
     }
     
     try {
-        await queueClient.add('payment_charge', 'payment.charge', { paymentId }, {
+        await queueClient.add('payment_charge', 'payment.charge', { paymentId, demo }, {
             removeOnComplete: true,
             attempts: 5,
             backoff: { type: 'exponential', delay: 250 }
         });
-        logger.debug({ paymentId }, 'enqueueChargeJob: job added successfully');
+        logger.debug({ paymentId, demo }, 'enqueueChargeJob: job added successfully');
     } catch (err) {
         logger.error({ error: err.message, paymentId }, 'enqueueChargeJob: failed to add job');
         throw err;
@@ -83,11 +83,11 @@ const enqueueChargeJob = async (paymentId) => {
 };
 
 class IdempotencyService {
-    static async createOrRetrieve({ orderId, idempotencyKey, amount, currency, userId = null }) {
+    static async createOrRetrieve({ orderId, idempotencyKey, amount, currency, userId = null, demo = { outcome: 'auto', processingSpeed: 'normal' } }) {
         try {
             assertPayload({ orderId, idempotencyKey, amount, currency });
 
-            logger.debug({ orderId, idempotencyKey, amount, currency, userId }, 'idempotency.createOrRetrieve.start');
+            logger.debug({ orderId, idempotencyKey, amount, currency, userId, demo }, 'idempotency.createOrRetrieve.start');
 
             // Check if this order already has a successful/processing payment
             // This prevents duplicate charges even with different idempotency keys
@@ -140,7 +140,7 @@ class IdempotencyService {
             if (created) {
                 logger.debug({ paymentId: payment.id }, 'idempotency.createOrRetrieve.enqueue');
                 try {
-                    await enqueueChargeJob(payment.id);
+                    await enqueueChargeJob(payment.id, demo);
                 } catch (queueErr) {
                     logger.error({ error: queueErr.message, paymentId: payment.id }, 'idempotency.createOrRetrieve.queue.error');
                     // Don't fail the request if queue fails, payment is already created
@@ -166,8 +166,8 @@ class IdempotencyService {
 
 const idempotencyService = {
     createOrRetrieve: (params) => IdempotencyService.createOrRetrieve(params),
-    resolve: (orderId, idempotencyKey, amount, currency, userId = null) =>
-        IdempotencyService.createOrRetrieve({ orderId, idempotencyKey, amount, currency, userId }),
+    resolve: (orderId, idempotencyKey, amount, currency, userId = null, demo = { outcome: 'auto', processingSpeed: 'normal' }) =>
+        IdempotencyService.createOrRetrieve({ orderId, idempotencyKey, amount, currency, userId, demo }),
     IdempotencyConflictError,
     IdempotencyMismatchError: IdempotencyConflictError,
     DuplicateOrderError

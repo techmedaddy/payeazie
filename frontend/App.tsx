@@ -57,6 +57,21 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
 }
 
 const App: React.FC = () => {
+  React.useEffect(() => {
+    const { origin, pathname, search, hash } = window.location;
+
+    if (pathname === '/') {
+      return;
+    }
+
+    const normalizedHash =
+      hash && hash.startsWith('#/')
+        ? hash
+        : `#${pathname}${search}`;
+
+    window.location.replace(`${origin}/${normalizedHash}`);
+  }, []);
+
   return (
     <ErrorBoundary>
       <ToastProvider>

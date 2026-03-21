@@ -1,6 +1,21 @@
 const logger = require('./logger');
 const metrics = require('./metrics');
 
+const FAILURE_REASONS = [
+    {
+        code: 'card_declined',
+        message: 'The card was declined by the issuer.'
+    },
+    {
+        code: 'insufficient_funds',
+        message: 'The payment method has insufficient funds.'
+    },
+    {
+        code: 'risk_review_required',
+        message: 'The payment was flagged for additional risk review.'
+    }
+];
+
 /**
  * Simulated gateway client for testing
  * In production, this would call actual payment gateway APIs
@@ -10,7 +25,7 @@ module.exports = {
      * Create a charge with the gateway
      * Called by charge.worker.js
      */
-    charge: async ({ amount, currency, idempotencyKey }) => {
+    charge: async ({ amount, currency, idempotencyKey, demo = {} }) => {
         const startTime = Date.now();
         
         try {
@@ -19,13 +34,21 @@ module.exports = {
 
             const chargeId = "ch_" + idempotencyKey.replace(/-/g, "");
 
-            // Simulate realistic outcomes: 90% succeeded, 10% failed
-            // Note: Removed 'processing' status - gateway should return terminal status
-            // If a real gateway returns 'processing', handle via reconciliation worker
-            const rand = Math.random();
-            const status = rand < 0.90 ? "succeeded" : "failed";
+            let status;
+            if (demo.outcome === 'success') {
+                status = 'succeeded';
+            } else if (demo.outcome === 'failure') {
+                status = 'failed';
+            } else {
+                const rand = Math.random();
+                status = rand < 0.90 ? "succeeded" : "failed";
+            }
+            const failure =
+                status === 'failed'
+                    ? FAILURE_REASONS[Math.floor(Math.random() * FAILURE_REASONS.length)]
+                    : null;
 
-            logger.info({ chargeId, amount, currency, status }, 'gatewayClient.charge simulated');
+            logger.info({ chargeId, amount, currency, status, demo }, 'gatewayClient.charge simulated');
 
             const responseTime = Date.now() - startTime;
             metrics.recordGatewayCall(true, responseTime);
@@ -35,7 +58,12 @@ module.exports = {
                 id: chargeId,
                 amount,
                 currency,
-                status
+                status,
+                provider: 'mock',
+                failureCode: failure?.code || null,
+                failureMessage: failure?.message || null,
+                demoOutcome: demo.outcome || 'auto',
+                processingSpeed: demo.processingSpeed || 'normal'
             };
             
             // Strict validation: MUST have id and status
@@ -75,10 +103,17 @@ module.exports = {
             // Simulate reconciliation: processing charges eventually succeed or fail
             const rand = Math.random();
             const status = rand < 0.85 ? "succeeded" : "failed";
+            const failure =
+                status === 'failed'
+                    ? FAILURE_REASONS[Math.floor(Math.random() * FAILURE_REASONS.length)]
+                    : null;
 
             const response = {
                 id: chargeId,
-                status
+                status,
+                provider: 'mock',
+                failureCode: failure?.code || null,
+                failureMessage: failure?.message || null
             };
             
             // Validate response structure

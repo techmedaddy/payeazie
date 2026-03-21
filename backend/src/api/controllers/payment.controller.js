@@ -5,6 +5,8 @@ const paymentOrchestrator = require('../../core/orchestrator/payment.orchestrato
 const metrics = require('../../utils/metrics');
 
 const sendResponse = (reply, statusCode, payload) => reply.code(statusCode).send(payload);
+const VALID_DEMO_OUTCOMES = new Set(['auto', 'success', 'failure']);
+const VALID_PROCESSING_SPEEDS = new Set(['normal', 'slow']);
 
 const transformPaymentResponse = (payment) => {
     if (!payment) return payment;
@@ -16,8 +18,104 @@ const transformPaymentResponse = (payment) => {
         currency: payment.currency,
         status: payment.status,
         gatewayChargeId: payment.gateway_charge_id,
+        userId: payment.user_id,
         createdAt: payment.created_at,
         updatedAt: payment.updated_at
+    };
+};
+
+const getAuditSummary = (entry, metadata = {}) => {
+    const actor = metadata.worker || entry.triggered_by || 'system';
+
+    if (entry.to_status === 'processing') {
+        return 'Payment picked up by the charge worker and moved into processing.';
+    }
+
+    if (entry.to_status === 'succeeded') {
+        return metadata.reason || 'Payment completed successfully after gateway confirmation.';
+    }
+
+    if (entry.to_status === 'failed') {
+        return metadata.error || metadata.reason || 'Payment processing failed.';
+    }
+
+    if (entry.to_status === 'pending') {
+        return 'Payment intent was created and queued for processing.';
+    }
+
+    return `Status changed from ${entry.from_status || 'unknown'} to ${entry.to_status} by ${actor}.`;
+};
+
+const transformAuditEntry = (entry) => {
+    const metadata = entry.metadata || {};
+
+    return {
+        id: entry.id,
+        paymentId: entry.payment_id,
+        fromStatus: entry.from_status,
+        toStatus: entry.to_status,
+        createdAt: entry.created_at,
+        triggeredBy: entry.triggered_by || 'system',
+        actor: entry.user_id
+            ? {
+                id: entry.user_id,
+                name: entry.user_name || null,
+                email: entry.user_email || null
+            }
+            : null,
+        worker: metadata.worker || null,
+        jobId: metadata.jobId || null,
+        chargeId: metadata.chargeId || null,
+        gatewayProvider: metadata.gatewayProvider || null,
+        gatewayStatus: metadata.gatewayStatus || entry.to_status,
+        failureCode: metadata.failureCode || null,
+        failureReason: metadata.error || null,
+        summary: getAuditSummary(entry, metadata),
+        metadata
+    };
+};
+
+const buildPaymentDetailsResponse = (payment, auditLog = []) => {
+    const response = transformPaymentResponse(payment);
+    const transformedAuditLog = auditLog.map(transformAuditEntry);
+    const latestActivity = transformedAuditLog[transformedAuditLog.length - 1] || null;
+    const latestFailure = [...transformedAuditLog].reverse().find((entry) => entry.toStatus === 'failed') || null;
+    const processingEvent = transformedAuditLog.find((entry) => entry.toStatus === 'processing') || null;
+
+    return {
+        ...response,
+        gateway: {
+            provider: latestActivity?.gatewayProvider || 'mock',
+            chargeId: response.gatewayChargeId || latestActivity?.chargeId || null,
+            lastKnownStatus: latestActivity?.gatewayStatus || response.status
+        },
+        processingDetails: processingEvent
+            ? {
+                startedAt: processingEvent.createdAt,
+                worker: processingEvent.worker,
+                jobId: processingEvent.jobId
+            }
+            : null,
+        failureDetails: latestFailure
+            ? {
+                reason: latestFailure.failureReason || latestFailure.summary,
+                code: latestFailure.failureCode,
+                worker: latestFailure.worker,
+                jobId: latestFailure.jobId,
+                failedAt: latestFailure.createdAt,
+                chargeId: latestFailure.chargeId
+            }
+            : null,
+        latestActivity: latestActivity
+            ? {
+                summary: latestActivity.summary,
+                createdAt: latestActivity.createdAt,
+                triggeredBy: latestActivity.triggeredBy,
+                worker: latestActivity.worker,
+                jobId: latestActivity.jobId
+            }
+            : null,
+        auditLog: transformedAuditLog
     };
 };
 
@@ -50,6 +148,25 @@ const validateIntentFields = ({ orderId, amount, currency, idempotencyKey }) => 
     return errors;
 };
 
+const normalizeDemoOptions = (demo) => {
+    if (!demo || typeof demo !== 'object') {
+        return {
+            outcome: 'auto',
+            processingSpeed: 'normal'
+        };
+    }
+
+    const outcome = VALID_DEMO_OUTCOMES.has(demo.outcome) ? demo.outcome : 'auto';
+    const processingSpeed = VALID_PROCESSING_SPEEDS.has(demo.processingSpeed)
+        ? demo.processingSpeed
+        : 'normal';
+
+    return {
+        outcome,
+        processingSpeed
+    };
+};
+
 const createPaymentIntent = async (req, reply) => {
     // Log incoming request details
     const logger = require('../../utils/logger');
@@ -72,8 +189,9 @@ const createPaymentIntent = async (req, reply) => {
         user: req.user
     }, 'createPaymentIntent: incoming request');
 
-    const { orderId, amount, currency } = req.body || {};
+    const { orderId, amount, currency, demo } = req.body || {};
     const idempotencyKey = req.headers['idempotency-key'];
+    const demoOptions = normalizeDemoOptions(demo);
     
     logger.debug({
         orderId,
@@ -94,8 +212,8 @@ const createPaymentIntent = async (req, reply) => {
     }
 
     try {
-        logger.debug({ orderId, idempotencyKey, userId: req.user?.id }, 'createPaymentIntent: calling idempotency.resolve');
-        const record = await idempotencyService.resolve(orderId, idempotencyKey, amount, currency, req.user?.id);
+        logger.debug({ orderId, idempotencyKey, userId: req.user?.id, demoOptions }, 'createPaymentIntent: calling idempotency.resolve');
+        const record = await idempotencyService.resolve(orderId, idempotencyKey, amount, currency, req.user?.id, demoOptions);
         
         // Record metrics
         metrics.recordPaymentCreated();
@@ -136,6 +254,7 @@ const createPaymentIntent = async (req, reply) => {
 
 const getPaymentStatus = async (req, reply) => {
     const logger = require('../../utils/logger');
+    const statusTransition = require('../../core/status-transition/status-transition.service');
     const { paymentId } = req.params || {};
 
     logger.info({ paymentId, userId: req.user?.id }, 'getPaymentStatus: incoming request');
@@ -164,8 +283,10 @@ const getPaymentStatus = async (req, reply) => {
             return sendResponse(reply, 403, { error: 'Forbidden', message: 'You do not have permission to access this payment' });
         }
         
-        logger.info({ paymentId, status: payment.status }, 'getPaymentStatus: success');
-        const response = transformPaymentResponse(payment);
+        const auditLog = await statusTransition.getAuditLog(paymentId);
+
+        logger.info({ paymentId, status: payment.status, auditCount: auditLog.length }, 'getPaymentStatus: success');
+        const response = buildPaymentDetailsResponse(payment, auditLog);
         return sendResponse(reply, 200, response);
     } catch (err) {
         logger.error({
@@ -210,7 +331,7 @@ const getPaymentAuditLog = async (req, reply) => {
         
         const auditLog = await statusTransition.getAuditLog(paymentId);
         logger.info({ paymentId, count: auditLog.length }, 'getPaymentAuditLog: success');
-        return sendResponse(reply, 200, { paymentId, auditLog });
+        return sendResponse(reply, 200, { paymentId, auditLog: auditLog.map(transformAuditEntry) });
     } catch (err) {
         logger.error({
             error: err.message,
@@ -327,8 +448,9 @@ const createPayment = async (req, reply) => {
     const logger = require('../../utils/logger');
     const { v4: uuidv4 } = require('uuid');
     
-    const { orderId, amount, currency } = req.body || {};
+    const { orderId, amount, currency, demo } = req.body || {};
     let idempotencyKey = req.headers['idempotency-key'];
+    const demoOptions = normalizeDemoOptions(demo);
     
     // Auto-generate idempotency key if not provided (for simple POST /api/payments)
     if (!idempotencyKey) {
@@ -356,7 +478,7 @@ const createPayment = async (req, reply) => {
     }
     
     try {
-        const record = await idempotencyService.resolve(orderId, idempotencyKey, amount, currency, req.user?.id);
+        const record = await idempotencyService.resolve(orderId, idempotencyKey, amount, currency, req.user?.id, demoOptions);
         
         metrics.recordPaymentCreated();
         metrics.recordPaymentStatus(record.status);

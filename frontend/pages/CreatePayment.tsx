@@ -27,6 +27,22 @@ const CreatePayment: React.FC = () => {
   const [responseStatus, setResponseStatus] = useState<'success' | 'error' | null>(null);
   const [isDuplicate, setIsDuplicate] = useState(false);
 
+  const getSubmissionToast = (
+    status: string
+  ): { message: string; type: 'success' | 'error' | 'info' } => {
+    const normalizedStatus = status.toUpperCase();
+
+    if (normalizedStatus === 'SUCCEEDED') {
+      return { message: 'Payment succeeded.', type: 'success' };
+    }
+
+    if (normalizedStatus === 'FAILED') {
+      return { message: 'Payment failed. Opening details.', type: 'error' };
+    }
+
+    return { message: 'Payment submitted. Opening live status details.', type: 'info' };
+  };
+
   // Check if user has auth token
   const hasAuthToken = !!api.getAuthToken();
 
@@ -95,13 +111,11 @@ const CreatePayment: React.FC = () => {
         setIsDuplicate(true);
         showToast('Payment already exists (idempotency)', 'info');
       } else {
-        showToast('Payment created successfully', 'success');
+        const toast = getSubmissionToast(response.status);
+        showToast(toast.message, toast.type);
       }
 
-      // Brief delay to let user see the success state before redirecting
-      setTimeout(() => {
-        navigate(`/payment/${response.id}`);
-      }, 2000);
+      navigate(`/payment/${response.id}`);
 
     } catch (error: any) {
       setResponseStatus('error');
@@ -297,7 +311,7 @@ const CreatePayment: React.FC = () => {
                      <>
                        <CheckCircle2 className="w-4 h-4 text-green-500" />
                        <span className="text-xs font-mono text-slate-300">
-                         {isDuplicate ? 'Existing Payment (Idempotency)' : 'Payment Created'}
+                         {isDuplicate ? 'Existing Payment (Idempotency)' : 'Payment Submitted'}
                        </span>
                      </>
                    ) : (

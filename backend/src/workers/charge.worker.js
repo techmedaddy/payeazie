@@ -21,6 +21,7 @@ if (!process.env.REDIS_URL) {
 const worker = createWorker('payment_charge', async (job) => {
     const startTime = Date.now();
     const { paymentId } = job.data || {};
+    const demo = job.data?.demo || { outcome: 'auto', processingSpeed: 'normal' };
 
     if (!paymentId) {
         logger.error({ jobId: job.id }, 'charge.worker missing paymentId');
@@ -35,6 +36,9 @@ const worker = createWorker('payment_charge', async (job) => {
         await statusTransition.transitionStatus(paymentId, 'processing', {
             worker: 'charge.worker',
             jobId: job.id,
+            gatewayProvider: 'mock',
+            demoOutcome: demo.outcome || 'auto',
+            processingSpeed: demo.processingSpeed || 'normal',
             reason: 'Worker acquired job lock'
         }, null, 'worker');
         logger.info({ paymentId }, 'charge.worker: transitioned to processing');
@@ -66,7 +70,8 @@ const worker = createWorker('payment_charge', async (job) => {
                 chargeResult = await gatewayClient.charge({
                     amount: payment.amount,
                     currency: payment.currency,
-                    idempotencyKey: payment.idempotency_key
+                    idempotencyKey: payment.idempotency_key,
+                    demo
                 });
                 
                 // Log detailed gateway response for debugging
@@ -142,7 +147,7 @@ const worker = createWorker('payment_charge', async (job) => {
             finalStatus = 'failed';
         }
         
-        logger.info({ 
+        logger.info({
             paymentId, 
             chargeId: chargeResult.id,
             gatewayStatus: chargeResult.status,
@@ -150,17 +155,24 @@ const worker = createWorker('payment_charge', async (job) => {
             willTransitionTo: finalStatus
         }, '🔄 charge.worker: using gateway status for final transition');
 
-        // DEMO: Add 30-second delay to showcase status transitions
-        logger.info({ paymentId, finalStatus }, '⏳ Waiting 30 seconds before final transition (demo mode)');
-        await sleep(30000);
-        logger.info({ paymentId, finalStatus }, '✓ Delay complete, proceeding with final transition');
+        if (demo.processingSpeed === 'slow') {
+            logger.info({ paymentId, finalStatus, demo }, '⏳ Waiting 30 seconds before final transition (demo mode)');
+            await sleep(30000);
+            logger.info({ paymentId, finalStatus }, '✓ Delay complete, proceeding with final transition');
+        }
 
         try {
             await statusTransition.transitionStatus(paymentId, finalStatus, {
                 worker: 'charge.worker',
                 jobId: job.id,
                 chargeId: chargeResult?.id,
-                reason: `Gateway charge completed with status: ${finalStatus}`
+                gatewayProvider: chargeResult?.provider || 'mock',
+                gatewayStatus: chargeResult?.status || finalStatus,
+                failureCode: chargeResult?.failureCode || null,
+                demoOutcome: chargeResult?.demoOutcome || demo.outcome || 'auto',
+                processingSpeed: chargeResult?.processingSpeed || demo.processingSpeed || 'normal',
+                error: chargeResult?.failureMessage || null,
+                reason: chargeResult?.failureMessage || `Gateway charge completed with status: ${finalStatus}`
             }, null, 'worker');
             logger.info({ 
                 paymentId, 
@@ -196,6 +208,9 @@ const worker = createWorker('payment_charge', async (job) => {
             await statusTransition.transitionStatus(paymentId, 'failed', {
                 worker: 'charge.worker',
                 jobId: job.id,
+                gatewayProvider: 'mock',
+                demoOutcome: demo.outcome || 'auto',
+                processingSpeed: demo.processingSpeed || 'normal',
                 reason: 'Gateway charge failed',
                 error: err.message
             }, null, 'worker');

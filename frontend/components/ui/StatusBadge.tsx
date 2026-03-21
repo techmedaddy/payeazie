@@ -20,8 +20,10 @@ const StatusBadge: React.FC<StatusBadgeProps> = ({
   size = 'md',
   className 
 }) => {
-  // Provide fallback for missing or unknown status
-  const displayStatus = status || 'Unknown';
+  const normalizedStatus =
+    typeof status === 'string' && status.trim()
+      ? status.trim().toUpperCase()
+      : 'UNKNOWN';
   
   // Status configuration with colors and icons
   const statusConfig: Record<string, { color: string; icon: React.ReactNode; label: string }> = {
@@ -45,7 +47,7 @@ const StatusBadge: React.FC<StatusBadgeProps> = ({
       icon: <XCircle className="w-3.5 h-3.5" />,
       label: "Failed"
     },
-    'Unknown': {
+    UNKNOWN: {
       color: "bg-amber-50 text-amber-700 border-amber-200",
       icon: <AlertCircle className="w-3.5 h-3.5" />,
       label: "Unknown"
@@ -53,7 +55,7 @@ const StatusBadge: React.FC<StatusBadgeProps> = ({
   };
 
   // Get config, fallback to Unknown if status not recognized
-  const config = statusConfig[displayStatus] || statusConfig['Unknown'];
+  const config = statusConfig[normalizedStatus] || statusConfig.UNKNOWN;
   
   // Size variants
   const sizeClasses = {

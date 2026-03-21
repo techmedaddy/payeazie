@@ -203,9 +203,14 @@ const getAuditLog = async (paymentId) => {
     }
 
     return db.any(
-        `SELECT * FROM payment_audit_log 
-         WHERE payment_id = $1 
-         ORDER BY created_at ASC`,
+        `SELECT 
+            pal.*,
+            u.email as user_email,
+            u.name as user_name
+         FROM payment_audit_log pal
+         LEFT JOIN users u ON pal.user_id = u.id
+         WHERE pal.payment_id = $1 
+         ORDER BY pal.created_at ASC`,
         [paymentId]
     );
 };
