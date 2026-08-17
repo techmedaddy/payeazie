@@ -97,6 +97,29 @@ function ensureEnv() {
   }
 }
 
+const IMS_URL = 'https://sentinelims.sytes.net/api/signals';
+
+async function reportToIMS(error, req) {
+  try {
+    const payload = {
+      component_id: 'payeazie-api',
+      component_type: 'API',
+      message: `[${req.method}] ${req.url} failed: ${error.message || 'Unknown error'}`,
+      ts: new Date().toISOString()
+    };
+
+    // Fire and forget
+    fetch(IMS_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }).catch(err => console.error('[IMS] Failed to send alert (Network Error):', err.message));
+        
+  } catch (imsError) {
+    console.error('[IMS] Integration Error:', imsError.message);
+  }
+}
+
 /**
  * Build Fastify server
  */
@@ -246,6 +269,19 @@ function buildServer() {
   app.get('/metrics/summary', async (request, reply) => {
     const metrics = require('./src/utils/metrics');
     return metrics.getSummary();
+  });
+
+  // Global Error Handler
+  app.setErrorHandler((error, request, reply) => {
+    const status = error.statusCode || error.status || 500;
+    
+    // Only report server errors to IMS
+    if (status >= 500) {
+      reportToIMS(error, request);
+    }
+    
+    // Original error response logic
+    reply.status(status).send({ error: error.message || 'Internal Server Error' });
   });
 
   return app;
