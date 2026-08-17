@@ -120,6 +120,8 @@ async function reportToIMS(error, req) {
   }
 }
 
+
+
 /**
  * Build Fastify server
  */
@@ -133,6 +135,13 @@ function buildServer() {
   // CORS
   app.register(cors, {
     origin: true,
+  });
+   app.setErrorHandler(function (error, request, reply) {
+    const status = error.statusCode || 500;
+    if (status >= 500) {
+        reportToIMS(error, request);
+    }
+    reply.status(status).send({ error: error.message || 'Internal Server Error' });
   });
 
   // Session handling (required for Passport, but we use JWT so sessions are minimal)
